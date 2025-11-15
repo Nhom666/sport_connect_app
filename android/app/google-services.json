@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "615662801111",
+    "project_id": "sportconnect-eafe7",
+    "storage_bucket": "sportconnect-eafe7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:615662801111:android:974946fff61d2d15eda092",
+        "android_client_info": {
+          "package_name": "com.example.sport_connect_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "615662801111-fjfihq7th6900n09t9rvru5bi1hfp3oi.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.sport_connect_app",
+            "certificate_hash": "1c0e983490bfac1abd67a1b5ded42d40a8c6f2ed"
+          }
+        },
+        {
+          "client_id": "615662801111-khvp4hh8m9on5vrbubtmf7h3vrvp7o1v.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBDik5A2Zm3jL9ddOrcCWLZ2D_RdLTId5o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "615662801111-khvp4hh8m9on5vrbubtmf7h3vrvp7o1v.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "615662801111-vftm9uuicou9n1f5s4i2glcg3akq7dv9.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.sportConnectApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
