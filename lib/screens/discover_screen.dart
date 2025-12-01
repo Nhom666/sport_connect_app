@@ -297,15 +297,6 @@ class _DiscoverScreenState extends State<DiscoverScreen>
     // --- END: SỬA LOGIC XÓA ---
   }
 
-  void _editEvent(DocumentSnapshot eventDoc) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CreateEventScreen(eventToEdit: eventDoc),
-      ),
-    );
-  }
-
   void _navigateToAllEvents(List<DocumentSnapshot> events) {
     Navigator.push(
       context,
@@ -560,18 +551,9 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                     leading: leadingWidget,
                     title: Text(eventName),
                     subtitle: Text(locationName),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () => _editEvent(doc),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () => _deleteEvent(doc),
-                        ),
-                      ],
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () => _deleteEvent(doc),
                     ),
                   ),
                 );

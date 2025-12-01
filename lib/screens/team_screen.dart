@@ -1116,7 +1116,8 @@ class _IndividualReviewTab extends StatelessWidget {
         final int lateCount = data['lateCount'] ?? 0;
         final int noShowCount = data['noShowCount'] ?? 0;
         final String displayName = data['displayName'] ?? 'User';
-        final String photoUrl = data['photoUrl'] ?? '';
+        final String photoUrl =
+            data['photoURL'] ?? ''; // Sửa từ photoUrl thành photoURL
 
         return Container(
           margin: const EdgeInsets.all(16),
@@ -1303,7 +1304,8 @@ class _IndividualReviewTab extends StatelessWidget {
         if (userSnapshot.hasData && userSnapshot.data!.exists) {
           final userData = userSnapshot.data!.data() as Map<String, dynamic>;
           reviewerName = userData['displayName'] ?? reviewerName;
-          reviewerImage = userData['photoUrl'];
+          reviewerImage =
+              userData['photoURL']; // Sửa từ photoUrl thành photoURL
         }
 
         return Container(

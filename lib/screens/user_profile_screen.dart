@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 import 'edit_profile_screen.dart';
 import 'personal_chat_screen.dart'; // <-- Import file chat cá nhân
 
@@ -35,6 +36,42 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   void initState() {
     super.initState();
     _loadUserData();
+  }
+
+  // Hàm lấy màu dựa trên điểm số
+  Color _getScoreColor(int score) {
+    if (score >= 90) return Colors.green;
+    if (score >= 75) return Colors.blue;
+    if (score >= 50) return Colors.orange;
+    return Colors.red;
+  }
+
+  // Hàm hiển thị text lý do đánh giá
+  String _getReasonText(String reason) {
+    switch (reason) {
+      case 'good':
+        return 'Đúng hẹn';
+      case 'late':
+        return 'Đến muộn';
+      case 'no_show':
+        return 'Vắng mặt';
+      default:
+        return reason;
+    }
+  }
+
+  // Hàm lấy màu cho lý do
+  Color _getReasonColor(String reason) {
+    switch (reason) {
+      case 'good':
+        return Colors.green;
+      case 'late':
+        return Colors.orange;
+      case 'no_show':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
   }
 
   // Hàm tải dữ liệu của cả 2 user để xác định mối quan hệ
@@ -435,6 +472,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       ),
                       child: ListView.builder(
                         shrinkWrap: true,
+                        physics: const BouncingScrollPhysics(),
                         itemCount: ownedTeams.length,
                         itemBuilder: (context, index) {
                           final teamDoc = ownedTeams[index];
@@ -527,203 +565,241 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      body: Stack(
-        children: [
-          Container(
-            height: 200,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Colors.blue, Color.fromARGB(255, 3, 96, 210)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-          ),
-          SingleChildScrollView(
-            child: Column(
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            // PHẦN CỐ ĐỊNH - Header với avatar, tên và email
+            Stack(
+              clipBehavior: Clip.none,
               children: [
-                const SizedBox(height: 120),
-                Center(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 4),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 10,
-                          offset: const Offset(0, 5),
+                Container(
+                  height: 200,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.blue, Color.fromARGB(255, 3, 96, 210)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 40,
+                  left: 10,
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.arrow_back_ios_new,
+                      color: Colors.white,
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
+                Positioned(
+                  top: 120,
+                  left: 0,
+                  right: 0,
+                  child: Column(
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 4),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 10,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    child: CircleAvatar(
-                      radius: 60,
-                      backgroundImage: photoUrl != null
-                          ? NetworkImage(photoUrl)
-                          : null,
-                      backgroundColor: Colors.grey[200],
-                      child: photoUrl == null
-                          ? Icon(
-                              Icons.person,
-                              size: 60,
-                              color: Colors.grey[600],
-                            )
-                          : null,
-                    ),
+                        child: CircleAvatar(
+                          radius: 60,
+                          backgroundImage: photoUrl != null
+                              ? NetworkImage(photoUrl)
+                              : null,
+                          backgroundColor: Colors.grey[200],
+                          child: photoUrl == null
+                              ? Icon(
+                                  Icons.person,
+                                  size: 60,
+                                  color: Colors.grey[600],
+                                )
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        displayName,
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        email,
+                        style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  displayName,
-                  style: const TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  email,
-                  style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                ),
-                const SizedBox(height: 24),
+              ],
+            ),
+            const SizedBox(
+              height: 120,
+            ), // Khoảng cách để avatar và text hiển thị đủ
+            // PHẦN SCROLL - Nội dung bên dưới
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 24),
 
-                // === THÊM MỚI: CARD THÔNG TIN PROFILE ===
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildProfileDetailTile(
-                            icon: Icons.sports_soccer,
-                            label: 'Môn thể thao yêu thích',
-                            value: favoriteSport,
-                            iconColor: Colors.green,
-                          ),
-                          const Divider(height: 20, thickness: 0.5),
-                          _buildProfileDetailTile(
-                            icon: Icons.star_border,
-                            label: 'Trình độ',
-                            value: level,
-                            iconColor: Colors.orange,
-                          ),
-                          const Divider(height: 20, thickness: 0.5),
-                          // Widget riêng cho Lịch rảnh (vì nó là 1 list)
-                          Row(
+                    // === CARD THÔNG TIN PROFILE ===
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Icon(
-                                Icons.schedule,
-                                color: Colors.purple,
-                                size: 22,
+                              _buildProfileDetailTile(
+                                icon: Icons.sports_soccer,
+                                label: 'Môn thể thao yêu thích',
+                                value: favoriteSport,
+                                iconColor: Colors.green,
                               ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Lịch trình rảnh rỗi',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: Colors.grey.shade600,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    if (freeSchedules.isEmpty)
-                                      const Text(
-                                        '-',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          color: Colors.black87,
-                                          fontWeight: FontWeight.w500,
+                              const Divider(height: 20, thickness: 0.5),
+                              _buildProfileDetailTile(
+                                icon: Icons.star_border,
+                                label: 'Trình độ',
+                                value: level,
+                                iconColor: Colors.orange,
+                              ),
+                              const Divider(height: 20, thickness: 0.5),
+                              // Widget riêng cho Lịch rảnh (vì nó là 1 list)
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.schedule,
+                                    color: Colors.purple,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Lịch trình rảnh rỗi',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: Colors.grey.shade600,
+                                            fontWeight: FontWeight.w500,
+                                          ),
                                         ),
-                                      )
-                                    else
-                                      Wrap(
-                                        spacing: 6.0,
-                                        runSpacing: 4.0,
-                                        children: freeSchedules
-                                            .map(
-                                              (schedule) => Chip(
-                                                label: Text(schedule),
-                                                backgroundColor:
-                                                    Colors.purple.shade50,
-                                                labelStyle: TextStyle(
-                                                  color: Colors.purple.shade900,
-                                                  fontWeight: FontWeight.w500,
-                                                  fontSize: 12,
-                                                ),
-                                                side: BorderSide.none,
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 6,
-                                                      vertical: 0,
+                                        const SizedBox(height: 8),
+                                        if (freeSchedules.isEmpty)
+                                          const Text(
+                                            '-',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              color: Colors.black87,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          )
+                                        else
+                                          Wrap(
+                                            spacing: 6.0,
+                                            runSpacing: 4.0,
+                                            children: freeSchedules
+                                                .map(
+                                                  (schedule) => Chip(
+                                                    label: Text(schedule),
+                                                    backgroundColor:
+                                                        Colors.purple.shade50,
+                                                    labelStyle: TextStyle(
+                                                      color: Colors
+                                                          .purple
+                                                          .shade900,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                      fontSize: 12,
                                                     ),
-                                                materialTapTargetSize:
-                                                    MaterialTapTargetSize
-                                                        .shrinkWrap,
-                                              ),
-                                            )
-                                            .toList(),
-                                      ),
-                                  ],
-                                ),
+                                                    side: BorderSide.none,
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 6,
+                                                          vertical: 0,
+                                                        ),
+                                                    materialTapTargetSize:
+                                                        MaterialTapTargetSize
+                                                            .shrinkWrap,
+                                                  ),
+                                                )
+                                                .toList(),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
-                  ),
-                ),
 
-                // ======================================
-                const SizedBox(height: 24),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(15),
+                    // ======================================
+                    const SizedBox(height: 24),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: _buildActionButtons(),
+                        ),
+                      ),
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: _buildActionButtons(),
+
+                    // --- SECTION ĐIỂM UY TÍN ---
+                    const SizedBox(height: 20),
+                    _buildReputationSection(),
+
+                    // --- SECTION LỊCH SỬ ĐÁNH GIÁ ---
+                    const SizedBox(height: 20),
+                    _buildReviewsSection(),
+
+                    const SizedBox(height: 20),
+                    Text(
+                      'UID: ${widget.userId}',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                     ),
-                  ),
+                    const SizedBox(height: 20),
+                  ],
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  'UID: ${widget.userId}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                const SizedBox(height: 20),
-              ],
+              ),
             ),
-          ),
-          Positioned(
-            top: 40,
-            left: 10,
-            child: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
-  }
+  } // --- UPDATED: Thêm nút "Nhắn tin" ---
 
-  // --- UPDATED: Thêm nút "Nhắn tin" ---
   Widget _buildActionButtons() {
     if (_isProcessing) {
       return const Center(
@@ -880,6 +956,316 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // --- SECTION ĐIỂM UY TÍN ---
+  Widget _buildReputationSection() {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userId)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final data = snapshot.data!.data() as Map<String, dynamic>?;
+        final int reputationScore = data?['reputationScore'] ?? 100;
+        final int goodCount = data?['goodCount'] ?? 0;
+        final int lateCount = data?['lateCount'] ?? 0;
+        final int noShowCount = data?['noShowCount'] ?? 0;
+
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    'Điểm uy tín',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _getScoreColor(reputationScore).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      reputationScore.toString(),
+                      style: TextStyle(
+                        color: _getScoreColor(reputationScore),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Divider(),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildStatItem('Đúng hẹn', goodCount, Colors.green),
+                  _buildStatItem('Đến muộn', lateCount, Colors.orange),
+                  _buildStatItem('Vắng mặt', noShowCount, Colors.red),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatItem(String label, int count, Color color) {
+    return Column(
+      children: [
+        Text(
+          count.toString(),
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- SECTION LỊCH SỬ ĐÁNH GIÁ ---
+  Widget _buildReviewsSection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Lịch sử đánh giá',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          _buildReviewsList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewsList() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('reviews')
+          .where('targetId', isEqualTo: widget.userId)
+          .where('targetType', isEqualTo: 'user')
+          .orderBy('createdAt', descending: true)
+          .limit(5) // Giới hạn 5 review gần nhất
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(20.0),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(30),
+            alignment: Alignment.center,
+            child: Column(
+              children: const [
+                Icon(Icons.rate_review_outlined, size: 50, color: Colors.grey),
+                SizedBox(height: 10),
+                Text(
+                  'Chưa có đánh giá nào.',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ],
+            ),
+          );
+        }
+
+        // Sử dụng Column thay vì ListView để tránh conflict scroll
+        return Column(
+          children: snapshot.data!.docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return _buildReviewItem(data);
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  Widget _buildReviewItem(Map<String, dynamic> reviewData) {
+    final String reason = reviewData['reason'] ?? 'good';
+    final String comment = reviewData['comment'] ?? '';
+    final String reviewerId = reviewData['reviewerId'] ?? '';
+    final Timestamp? createdAt = reviewData['createdAt'];
+
+    final String dateString = createdAt != null
+        ? DateFormat('dd/MM/yyyy HH:mm').format(createdAt.toDate())
+        : 'Unknown Date';
+
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('users')
+          .doc(reviewerId)
+          .get(),
+      builder: (context, userSnapshot) {
+        String reviewerName = 'Người dùng ẩn danh';
+        String? reviewerImage;
+
+        if (userSnapshot.hasData && userSnapshot.data!.exists) {
+          final userData = userSnapshot.data!.data() as Map<String, dynamic>;
+          reviewerName = userData['displayName'] ?? reviewerName;
+          reviewerImage = userData['photoURL'];
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundImage:
+                        (reviewerImage != null && reviewerImage.isNotEmpty)
+                        ? NetworkImage(reviewerImage)
+                        : null,
+                    backgroundColor: Colors.blue.shade100,
+                    child: (reviewerImage == null || reviewerImage.isEmpty)
+                        ? Text(
+                            reviewerName.isNotEmpty
+                                ? reviewerName[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(color: Colors.blue),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          reviewerName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        Text(
+                          dateString,
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _getReasonColor(reason).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _getReasonColor(reason).withOpacity(0.3),
+                      ),
+                    ),
+                    child: Text(
+                      _getReasonText(reason),
+                      style: TextStyle(
+                        color: _getReasonColor(reason),
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (comment.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    comment,
+                    style: const TextStyle(fontSize: 14, color: Colors.black87),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 

@@ -118,8 +118,16 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
           if (members != null && members.isNotEmpty) {
             // Gửi thông báo cho từng member
             for (var member in members) {
-              final memberId = member['uid'] as String?;
-              if (memberId != null) {
+              // Xử lý cả 2 trường hợp: String hoặc Map
+              String? memberId;
+              if (member is String) {
+                memberId = member; // Trường hợp: ["uid1", "uid2"]
+              } else if (member is Map) {
+                memberId =
+                    member['uid'] as String?; // Trường hợp: [{"uid": "uid1"}]
+              }
+
+              if (memberId != null && memberId.isNotEmpty) {
                 await alarmService.scheduleEventReminders(
                   eventId: '${eventId}_${memberId}',
                   eventName: eventName,
@@ -572,8 +580,17 @@ class _ScheduleItemCard extends StatelessWidget {
               if (members != null && members.isNotEmpty) {
                 // Gửi thông báo cho từng member
                 for (var member in members) {
-                  final memberId = member['uid'] as String?;
-                  if (memberId != null) {
+                  // Xử lý cả 2 trường hợp: String hoặc Map
+                  String? memberId;
+                  if (member is String) {
+                    memberId = member; // Trường hợp: ["uid1", "uid2"]
+                  } else if (member is Map) {
+                    memberId =
+                        member['uid']
+                            as String?; // Trường hợp: [{"uid": "uid1"}]
+                  }
+
+                  if (memberId != null && memberId.isNotEmpty) {
                     await alarmService.scheduleEventReminders(
                       eventId: '${eventId}_${memberId}',
                       eventName: eventName,
@@ -779,7 +796,12 @@ class _ScheduleItemCard extends StatelessWidget {
         statusButton = _buildStatusChip('Waiting', Colors.grey);
       }
     } else if (status == 'cancelled' || status == 'regretted') {
-      statusButton = _buildStatusChip('Cancelled', Colors.red);
+      final cancelReason = data['cancelReason'] as String?;
+      if (cancelReason != null && cancelReason.contains('time changed')) {
+        statusButton = _buildStatusChip('Changed', Colors.red);
+      } else {
+        statusButton = _buildStatusChip('Cancelled', Colors.red);
+      }
     } else {
       statusButton = const SizedBox.shrink();
     }

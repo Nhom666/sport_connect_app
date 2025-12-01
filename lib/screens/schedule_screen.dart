@@ -658,11 +658,47 @@ class _ScheduleItemCard extends StatelessWidget {
   }
 
   Future<void> _updateRequestStatus(String status) async {
-    await joinRequestDoc.reference.update({'status': status});
+    final data = joinRequestDoc.data() as Map<String, dynamic>;
+
+    // Nếu accept, lưu snapshot thời gian vào joinRequest
+    if (status == 'accepted') {
+      final eventId = data['eventId'] as String?;
+
+      if (eventId != null) {
+        try {
+          // Lấy thông tin event hiện tại
+          final eventDoc = await FirebaseFirestore.instance
+              .collection('events')
+              .doc(eventId)
+              .get();
+
+          if (eventDoc.exists) {
+            final eventData = eventDoc.data() as Map<String, dynamic>;
+
+            // Cập nhật request với snapshot thời gian
+            await joinRequestDoc.reference.update({
+              'status': status,
+              'acceptedAt': FieldValue.serverTimestamp(),
+              // Lưu snapshot thời gian tại thời điểm accept
+              'eventTime': eventData['eventTime'],
+              'eventEndTime': eventData['eventEndTime'],
+            });
+          } else {
+            await joinRequestDoc.reference.update({'status': status});
+          }
+        } catch (e) {
+          print('Lỗi khi lưu snapshot: $e');
+          await joinRequestDoc.reference.update({'status': status});
+        }
+      } else {
+        await joinRequestDoc.reference.update({'status': status});
+      }
+    } else {
+      await joinRequestDoc.reference.update({'status': status});
+    }
 
     // Lên lịch thông báo khi accept - DÙNG ALARMMANAGER
     if (status == 'accepted') {
-      final data = joinRequestDoc.data() as Map<String, dynamic>;
       final eventId = data['eventId'] as String?;
       final eventName = data['eventName'] as String? ?? 'Sự kiện';
       final eventTime = data['eventTime'] as Timestamp?;
@@ -842,7 +878,13 @@ class _ScheduleItemCard extends StatelessWidget {
           statusButton = _buildStatusChip('Regretted', Colors.red);
           break;
         case 'cancelled':
-          statusButton = _buildStatusChip('Cancelled', Colors.red);
+          // Kiểm tra lý do cancel
+          final cancelReason = data['cancelReason'] as String?;
+          if (cancelReason != null && cancelReason.contains('time changed')) {
+            statusButton = _buildStatusChip('Changed', Colors.red);
+          } else {
+            statusButton = _buildStatusChip('Cancelled', Colors.red);
+          }
           break;
         default:
           statusButton = const SizedBox.shrink();
@@ -856,7 +898,12 @@ class _ScheduleItemCard extends StatelessWidget {
           statusButton = _buildStatusChip('Joined', Colors.green);
           break;
         case 'cancelled':
-          statusButton = _buildStatusChip('Cancelled', Colors.red);
+          final cancelReason = data['cancelReason'] as String?;
+          if (cancelReason != null && cancelReason.contains('time changed')) {
+            statusButton = _buildStatusChip('Changed', Colors.red);
+          } else {
+            statusButton = _buildStatusChip('Cancelled', Colors.red);
+          }
           break;
         case 'regretted':
           statusButton = _buildStatusChip('Declined', Colors.red);

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart'; // Thêm để dùng CupertinoPicker
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geoflutterfire3/geoflutterfire3.dart';
 import 'package:geolocator/geolocator.dart';
@@ -67,6 +68,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   String _creatorType = 'individual'; // 'individual' hoặc 'team'
   String? _selectedTeamId;
   String? _selectedTeamName; // Lưu tên để hiển thị
+  String? _selectedTeamSport; // Môn thể thao của team đã chọn
   Future<List<DocumentSnapshot>>? _teamsFuture; // Tải danh sách team
 
   @override
@@ -102,10 +104,14 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       if (_creatorType == 'team') {
         _selectedTeamId = _eventData!['organizerId'];
         // Tên team (_selectedTeamName) sẽ được tự động điền bởi FutureBuilder
+        // Load môn thể thao của team khi edit
+        _loadTeamSport(_selectedTeamId!);
       } else if (widget.preSelectedTeamId != null) {
         _creatorType = 'team'; // Tự động chuyển sang chế độ Team
         _selectedTeamId = widget.preSelectedTeamId;
         _selectedTeamName = widget.preSelectedTeamName;
+        // Load môn thể thao của team
+        _loadTeamSport(widget.preSelectedTeamId!);
       }
     }
   }
@@ -122,6 +128,22 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     setState(() {
       _teamsFuture = query.get().then((snapshot) => snapshot.docs);
     });
+  }
+
+  // Hàm tải môn thể thao của team từ Firestore
+  Future<void> _loadTeamSport(String teamId) async {
+    try {
+      final teamDoc = await _firestore.collection('teams').doc(teamId).get();
+      if (teamDoc.exists) {
+        final teamData = teamDoc.data() as Map<String, dynamic>;
+        setState(() {
+          _selectedTeamSport = teamData['sport'];
+          _selectedSport = _selectedTeamSport; // Auto-set sport
+        });
+      }
+    } catch (e) {
+      print('Error loading team sport: $e');
+    }
   }
 
   @override
@@ -153,20 +175,136 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       initialDate: _eventDateTime ?? now,
       firstDate: now, // Chỉ cho phép chọn từ hôm nay trở đi
       lastDate: now.add(const Duration(days: 365)),
+      // 🎨 Custom theme cho đẹp hơn
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF070770), // Màu chính (header, selected)
+              onPrimary: Colors.white, // Text trên màu chính
+              surface: Colors.white, // Nền dialog
+              onSurface: Colors.black87, // Text thường
+            ),
+            dialogBackgroundColor: Colors.white,
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF070770), // Màu nút Cancel/OK
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
     if (date == null) return;
-    final TimeOfDay? time = await showTimePicker(
+
+    // 🎯 Dùng CupertinoTimePicker (kiểu cuộn iOS)
+    DateTime initialTime = _eventDateTime ?? now;
+    DateTime? selectedTime;
+
+    await showModalBottomSheet(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(_eventDateTime ?? now),
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext builder) {
+        return Container(
+          height: 350,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF070770).withOpacity(0.1),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text(
+                        'Hủy',
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const Text(
+                      'Chọn giờ',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF070770),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        // Chỉ pop 1 lần với giá trị selectedTime
+                        Navigator.pop(context, selectedTime);
+                      },
+                      child: const Text(
+                        'Xong',
+                        style: TextStyle(
+                          color: Color(0xFF070770),
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Time Picker
+              Expanded(
+                child: CupertinoTheme(
+                  data: const CupertinoThemeData(
+                    textTheme: CupertinoTextThemeData(
+                      dateTimePickerTextStyle: TextStyle(
+                        fontSize: 22,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ),
+                  child: CupertinoDatePicker(
+                    mode: CupertinoDatePickerMode.time,
+                    use24hFormat: true, // Dùng định dạng 24h
+                    initialDateTime: initialTime,
+                    onDateTimeChanged: (DateTime newTime) {
+                      selectedTime = newTime;
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
-    if (time == null) return;
+
+    // selectedTime đã được cập nhật từ onDateTimeChanged
+    if (selectedTime == null) return;
 
     final newDateTime = DateTime(
       date.year,
       date.month,
       date.day,
-      time.hour,
-      time.minute,
+      selectedTime!.hour,
+      selectedTime!.minute,
     );
 
     // --- (THÊM MỚI) Kiểm tra xem thời gian có trong quá khứ không ---
@@ -236,25 +374,135 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       lastDate: _eventDateTime!.add(
         const Duration(days: 7),
       ), // Tối đa 7 ngày sau
+      // 🎨 Custom theme
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF070770),
+              onPrimary: Colors.white,
+              surface: Colors.white,
+              onSurface: Colors.black87,
+            ),
+            dialogBackgroundColor: Colors.white,
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF070770),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
     if (date == null) return;
 
-    final TimeOfDay? time = await showTimePicker(
+    // 🎯 Dùng CupertinoTimePicker cho thời gian kết thúc
+    DateTime initialEndTime =
+        _eventEndDateTime ?? _eventDateTime!.add(const Duration(hours: 2));
+    DateTime? selectedEndTime;
+
+    await showModalBottomSheet(
       context: context,
-      initialTime: _eventEndDateTime != null
-          ? TimeOfDay.fromDateTime(_eventEndDateTime!)
-          : TimeOfDay.fromDateTime(
-              _eventDateTime!.add(const Duration(hours: 2)),
-            ),
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext builder) {
+        return Container(
+          height: 350,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF070770).withOpacity(0.1),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text(
+                        'Hủy',
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const Text(
+                      'Chọn giờ kết thúc',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF070770),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        // Chỉ pop 1 lần với giá trị selectedEndTime
+                        Navigator.pop(context, selectedEndTime);
+                      },
+                      child: const Text(
+                        'Xong',
+                        style: TextStyle(
+                          color: Color(0xFF070770),
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: CupertinoTheme(
+                  data: const CupertinoThemeData(
+                    textTheme: CupertinoTextThemeData(
+                      dateTimePickerTextStyle: TextStyle(
+                        fontSize: 22,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ),
+                  child: CupertinoDatePicker(
+                    mode: CupertinoDatePickerMode.time,
+                    use24hFormat: true,
+                    initialDateTime: initialEndTime,
+                    onDateTimeChanged: (DateTime newTime) {
+                      selectedEndTime = newTime;
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
-    if (time == null) return;
+
+    // selectedEndTime đã được cập nhật từ onDateTimeChanged
+    if (selectedEndTime == null) return;
 
     final newEndDateTime = DateTime(
       date.year,
       date.month,
       date.day,
-      time.hour,
-      time.minute,
+      selectedEndTime!.hour,
+      selectedEndTime!.minute,
     );
 
     // Kiểm tra thời gian kết thúc phải sau thời gian bắt đầu
@@ -304,6 +552,158 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     setState(() {
       _eventEndDateTime = newEndDateTime;
     });
+  }
+
+  // Hàm xử lý khi thời gian event thay đổi - huỷ các request đã accept
+  Future<void> _handleTimeChangeForAcceptedRequests(
+    String eventId,
+    String eventName,
+  ) async {
+    try {
+      // Tìm tất cả các joinRequest đã được accept cho event này
+      final acceptedRequests = await _firestore
+          .collection('joinRequests')
+          .where('eventId', isEqualTo: eventId)
+          .where('status', isEqualTo: 'accepted')
+          .get();
+
+      if (acceptedRequests.docs.isEmpty) {
+        print('ℹ️ Không có request nào đã accept');
+        return;
+      }
+
+      print(
+        '⚠️ Thời gian event thay đổi - Huỷ ${acceptedRequests.docs.length} request(s)',
+      );
+
+      // Huỷ tất cả các request đã accept
+      final batch = _firestore.batch();
+      final Set<String> affectedUserIds =
+          {}; // Lưu tất cả user IDs bị ảnh hưởng
+
+      for (final doc in acceptedRequests.docs) {
+        final data = doc.data();
+        final requesterId = data['requesterId'] as String?;
+        final requesterType = data['requesterType'] as String?;
+
+        batch.update(doc.reference, {
+          'status': 'cancelled',
+          'cancelReason': 'Event time changed by organizer',
+          'cancelledAt': FieldValue.serverTimestamp(),
+        });
+
+        // Thu thập user IDs để gửi notification
+        if (requesterId != null) {
+          if (requesterType == 'team') {
+            // Nếu là team, lấy tất cả members
+            try {
+              final teamDoc = await _firestore
+                  .collection('teams')
+                  .doc(requesterId)
+                  .get();
+              if (teamDoc.exists) {
+                final teamData = teamDoc.data();
+                final members = teamData?['members'] as List<dynamic>?;
+                if (members != null) {
+                  for (var member in members) {
+                    String? memberId;
+                    if (member is String) {
+                      memberId = member;
+                    } else if (member is Map) {
+                      memberId = member['uid'] as String?;
+                    }
+                    if (memberId != null) {
+                      affectedUserIds.add(memberId);
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              print('⚠️ Lỗi khi lấy team members: $e');
+            }
+          } else {
+            // Nếu là individual user
+            affectedUserIds.add(requesterId);
+          }
+        }
+      }
+
+      await batch.commit();
+
+      // Gửi notification cho TẤT CẢ users bị ảnh hưởng
+      if (affectedUserIds.isNotEmpty) {
+        await _sendTimeChangeNotifications(affectedUserIds.toList(), eventName);
+      }
+
+      // Hiển thị thông báo cho owner
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Thời gian event đã thay đổi. '
+              '${acceptedRequests.docs.length} lời mời đã chấp nhận bị huỷ.\n'
+              'Đã gửi thông báo cho ${affectedUserIds.length} người.',
+            ),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+
+      print(
+        '✅ Đã huỷ request và gửi notification cho ${affectedUserIds.length} users',
+      );
+    } catch (e) {
+      print('❌ Lỗi khi xử lý time change: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Cảnh báo: Không thể cập nhật trạng thái cho những người đã tham gia',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Hàm gửi notification cho users khi event time thay đổi
+  Future<void> _sendTimeChangeNotifications(
+    List<String> userIds,
+    String eventName,
+  ) async {
+    try {
+      // Tạo notification documents trong Firestore
+      final batch = _firestore.batch();
+      final now = Timestamp.now();
+
+      for (String userId in userIds) {
+        final notificationRef = _firestore
+            .collection('users')
+            .doc(userId)
+            .collection('notifications')
+            .doc();
+
+        batch.set(notificationRef, {
+          'title': '⚠️ Sự kiện bị thay đổi',
+          'body':
+              '"$eventName" đã thay đổi thời gian. Lời mời của bạn đã bị huỷ.',
+          'type': 'event_time_changed',
+          'eventName': eventName,
+          'createdAt': now,
+          'read': false,
+        });
+      }
+
+      await batch.commit();
+      print('📬 Đã tạo ${userIds.length} notification documents');
+
+      // TODO: Nếu có FCM (Firebase Cloud Messaging) setup, có thể gửi push notification thật
+      // Hiện tại notification được lưu trong Firestore, user sẽ thấy khi mở app
+    } catch (e) {
+      print('❌ Lỗi khi gửi notifications: $e');
+    }
   }
 
   // Hàm kiểm tra xem người dùng có sự kiện nào được accept vào thời gian này không
@@ -605,10 +1005,32 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
 
       // 5. Logic Save (Update hoặc Add)
       if (_isEditing) {
+        // Kiểm tra xem có thay đổi thời gian không
+        final oldEventTime = _eventData!['eventTime'] as Timestamp?;
+        final oldEventEndTime = _eventData!['eventEndTime'] as Timestamp?;
+        final newEventTime = Timestamp.fromDate(_eventDateTime!);
+        final newEventEndTime = Timestamp.fromDate(_eventEndDateTime!);
+
+        bool timeChanged = false;
+        if (oldEventTime != null && oldEventEndTime != null) {
+          timeChanged =
+              oldEventTime != newEventTime ||
+              oldEventEndTime != newEventEndTime;
+        }
+
+        // Cập nhật event
         await _firestore
             .collection('events')
             .doc(widget.eventToEdit!.id)
             .update(data);
+
+        // Nếu thời gian thay đổi, huỷ các request đã accept và thông báo
+        if (timeChanged) {
+          await _handleTimeChangeForAcceptedRequests(
+            widget.eventToEdit!.id,
+            _eventNameController.text,
+          );
+        }
       } else {
         await _firestore.collection('events').add(data);
       }
@@ -780,6 +1202,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                           _creatorType = newSelection.first;
                           _selectedTeamId = null; // Reset team khi chuyển
                           _selectedTeamName = null;
+                          _selectedTeamSport =
+                              null; // Reset môn thể thao của team
+                          // Không reset _selectedSport để user có thể giữ lại lựa chọn cũ
                         });
                       },
                       style: SegmentedButton.styleFrom(
@@ -866,13 +1291,20 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                               selectedItem: _selectedTeamName,
                               onChanged: (value) {
                                 setState(() {
-                                  // Tìm ID dựa trên tên
-                                  _selectedTeamName = value;
-                                  _selectedTeamId = snapshot.data!
+                                  // Tìm team document dựa trên tên
+                                  final selectedTeamDoc = snapshot.data!
                                       .firstWhere(
                                         (doc) => doc['teamName'] == value,
-                                      )
-                                      .id;
+                                      );
+                                  _selectedTeamName = value;
+                                  _selectedTeamId = selectedTeamDoc.id;
+
+                                  // Tự động set môn thể thao theo team
+                                  final teamData =
+                                      selectedTeamDoc.data()
+                                          as Map<String, dynamic>;
+                                  _selectedTeamSport = teamData['sport'];
+                                  _selectedSport = _selectedTeamSport;
                                 });
                               },
                             ),
@@ -895,16 +1327,74 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                     'VD: Sân vận động Anfield',
                   ),
                   const SizedBox(height: 20),
-                  CustomDropdownWidget(
-                    title: 'Môn thể thao',
-                    items: _sports,
-                    selectedItem: _selectedSport,
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedSport = value;
-                      });
-                    },
-                  ),
+                  // Hiển thị môn thể thao (disable nếu đang ở chế độ team)
+                  _creatorType == 'team' && _selectedTeamSport != null
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Môn thể thao',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors
+                                    .grey[300], // Màu xám để thể hiện disabled
+                                borderRadius: kDefaultBorderRadius,
+                              ),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    _selectedTeamSport!,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.lock_outline,
+                                        color: Colors.grey[600],
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '(Theo đội)',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey[600],
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        )
+                      : CustomDropdownWidget(
+                          title: 'Môn thể thao',
+                          items: _sports,
+                          selectedItem: _selectedSport,
+                          onChanged: (value) {
+                            setState(() {
+                              _selectedSport = value;
+                            });
+                          },
+                        ),
                   const SizedBox(height: 20),
 
                   // --- (MỚI) Thêm Dropdown Trình độ ---

@@ -118,22 +118,94 @@ exports.onJoinRequestAccepted = onDocumentUpdated(
         batch.update(doc.ref, { status: "regretted" });
       });
 
-      // --- BƯỚC C: HỦY CÁC YÊU CẦU TRÙNG GIỜ CỦA CHÍNH NGƯỜI ĐƯỢC ACCEPT ---
-      // Tìm các request của user này ở event khác nhưng cùng khung giờ
-      const sameUserOtherRequests = await db
-        .collection("joinRequests")
-        .where("requesterId", "==", requesterId)
-        .where("status", "==", "pending")
-        .where("eventTime", "==", acceptedEventTime)
-        .get();
+      // --- BƯỚC C: HỦY CÁC YÊU CẦU TRÙNG GIỜ CỦA NGƯỜI/TEAM ĐƯỢC ACCEPT ---
+      const requesterType = afterData.requesterType; // 'individual' hoặc 'team'
+      const eventOwnerId = afterData.eventOwnerId;
+      const creatorType = afterData.creatorType; // 'individual' hoặc 'team'
 
-      sameUserOtherRequests.docs.forEach((doc) => {
-        if (doc.id !== acceptedDocId) {
-          console.log(`Hủy request trùng giờ của user: ${doc.id}`);
-          // Chuyển sang 'cancelled' (Hủy bỏ do user đã bận event này)
-          batch.update(doc.ref, { status: "cancelled" });
+      // C1: Hủy request trùng giờ của REQUESTER
+      if (requesterType === "individual") {
+        // Nếu là cá nhân: Hủy các request khác của user này cùng giờ
+        const sameUserRequests = await db
+          .collection("joinRequests")
+          .where("requesterId", "==", requesterId)
+          .where("status", "==", "pending")
+          .where("eventTime", "==", acceptedEventTime)
+          .get();
+
+        sameUserRequests.docs.forEach((doc) => {
+          if (doc.id !== acceptedDocId) {
+            console.log(`Hủy request trùng giờ của user: ${doc.id}`);
+            batch.update(doc.ref, { status: "cancelled" });
+          }
+        });
+      } else if (requesterType === "team") {
+        // Nếu là team: Lấy danh sách members và hủy request của TẤT CẢ members
+        try {
+          const teamDoc = await db.collection("teams").doc(requesterId).get();
+          if (teamDoc.exists) {
+            const members = teamDoc.data().members || [];
+            const memberIds = members.map((m) => m.uid).filter((uid) => uid);
+
+            if (memberIds.length > 0) {
+              // Hủy request của từng member cùng giờ
+              for (const memberId of memberIds) {
+                const memberRequests = await db
+                  .collection("joinRequests")
+                  .where("requesterId", "==", memberId)
+                  .where("status", "==", "pending")
+                  .where("eventTime", "==", acceptedEventTime)
+                  .get();
+
+                memberRequests.docs.forEach((doc) => {
+                  console.log(
+                    `Hủy request trùng giờ của member ${memberId}: ${doc.id}`
+                  );
+                  batch.update(doc.ref, { status: "cancelled" });
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Lỗi khi lấy members của requester team:", err);
         }
-      });
+      }
+
+      // C2: Hủy request trùng giờ của EVENT OWNER (nếu owner là team)
+      if (creatorType === "team" && eventOwnerId) {
+        try {
+          const ownerTeamDoc = await db
+            .collection("teams")
+            .doc(eventOwnerId)
+            .get();
+          if (ownerTeamDoc.exists) {
+            const ownerMembers = ownerTeamDoc.data().members || [];
+            const ownerMemberIds = ownerMembers
+              .map((m) => m.uid)
+              .filter((uid) => uid);
+
+            if (ownerMemberIds.length > 0) {
+              for (const memberId of ownerMemberIds) {
+                const ownerMemberRequests = await db
+                  .collection("joinRequests")
+                  .where("requesterId", "==", memberId)
+                  .where("status", "==", "pending")
+                  .where("eventTime", "==", acceptedEventTime)
+                  .get();
+
+                ownerMemberRequests.docs.forEach((doc) => {
+                  console.log(
+                    `Hủy request trùng giờ của owner member ${memberId}: ${doc.id}`
+                  );
+                  batch.update(doc.ref, { status: "cancelled" });
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Lỗi khi lấy members của owner team:", err);
+        }
+      }
 
       // --- THỰC THI TẤT CẢ ---
       await batch.commit();
