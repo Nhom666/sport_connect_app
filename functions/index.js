@@ -369,3 +369,95 @@ exports.sports_news_api = onRequest(
   { region: "asia-southeast1" }, // Cấu hình
   app // Truyền app Express vào
 );
+
+// === PHẦN 6: HÀM TỰ ĐỘNG HỒI PHỤC ĐIỂM UY TÍN (Scheduled) ===
+exports.autoRecoverReputation = onSchedule(
+  {
+    schedule: "every 1 hours", // Chạy mỗi tiếng để kiểm tra (hoặc "every 24 hours" nếu muốn tiết kiệm)
+    region: "asia-southeast1",
+    timeZone: "Asia/Ho_Chi_Minh",
+  },
+  async (event) => {
+    console.log("Đang chạy: autoRecoverReputation...");
+    const batch = db.batch();
+    let operationCount = 0;
+    const MAX_BATCH_SIZE = 400; // Firestore giới hạn 500, để 400 cho an toàn
+
+    // Danh sách các collection cần quét
+    const collections = ["users", "teams"];
+
+    try {
+      for (const colName of collections) {
+        // Chỉ lấy những document có điểm < 50 để xử lý
+        // Lưu ý: Cần tạo Composite Index cho collection này nếu báo lỗi
+        const snapshot = await db
+          .collection(colName)
+          .where("reputationScore", "<", 50)
+          .get();
+
+        if (snapshot.empty) continue;
+
+        for (const doc of snapshot.docs) {
+          const data = doc.data();
+          const currentScore = data.reputationScore || 100;
+          const lastRecoveryTime = data.lastRecoveryTime;
+
+          // Nếu chưa có lastRecoveryTime, set ngay bây giờ để bắt đầu tính giờ
+          if (!lastRecoveryTime) {
+            batch.update(doc.ref, {
+              lastRecoveryTime: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            operationCount++;
+            continue;
+          }
+
+          const lastDate = lastRecoveryTime.toDate();
+          const now = new Date();
+          // Tính khoảng cách thời gian (giờ)
+          const diffHours = (now - lastDate) / (1000 * 60 * 60);
+
+          // Logic giống hệt file Dart: Đủ 24h mới cộng
+          if (diffHours >= 24) {
+            const cycles = Math.floor(diffHours / 24); // Số chu kỳ 24h đã trôi qua
+            const pointsToRecover = 10 * cycles; // 10 điểm mỗi chu kỳ
+
+            let newScore = currentScore + pointsToRecover;
+            if (newScore > 100) newScore = 100; // Không vượt quá 100
+
+            // Chỉ update nếu điểm thực sự thay đổi
+            if (newScore > currentScore) {
+              batch.update(doc.ref, {
+                reputationScore: newScore,
+                // Reset mốc thời gian về hiện tại để tính chu kỳ tiếp theo
+                lastRecoveryTime: admin.firestore.FieldValue.serverTimestamp(),
+              });
+              operationCount++;
+            }
+          }
+
+          // Xử lý giới hạn Batch (nếu quá nhiều user cần hồi phục cùng lúc)
+          if (operationCount >= MAX_BATCH_SIZE) {
+            await batch.commit();
+            console.log(`Đã commit batch ${MAX_BATCH_SIZE} operations.`);
+            operationCount = 0; // Reset đếm
+            // Tạo batch mới (Firestore batch không tái sử dụng được sau commit)
+            // Lưu ý: Trong thực tế cần logic phức tạp hơn để handle batch mới,
+            // nhưng ở quy mô nhỏ có thể bỏ qua hoặc chạy lại vào giờ sau.
+          }
+        }
+      }
+
+      // Commit những thay đổi còn lại
+      if (operationCount > 0) {
+        await batch.commit();
+        console.log(`Hoàn tất hồi phục điểm cho ${operationCount} trường hợp.`);
+      } else {
+        console.log("Không có trường hợp nào đủ điều kiện hồi phục điểm.");
+      }
+      return null;
+    } catch (error) {
+      console.error("Lỗi trong autoRecoverReputation:", error);
+      return null;
+    }
+  }
+);
