@@ -11,6 +11,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../widgets/custom_dropdown_widget.dart';
 import '../utils/constants.dart';
+import '../utils/reputation_utils.dart';
 
 class CreateEventScreen extends StatefulWidget {
   final DocumentSnapshot? eventToEdit;
@@ -451,6 +452,64 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       return;
     }
 
+    //Xác định ID cần kiểm tra uy tín (User hoặc Team)
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    String targetCheckId = user.uid;
+    String targetCollection = 'users';
+    String targetName = 'Bạn';
+
+    if (_creatorType == 'team') {
+      if (_selectedTeamId == null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Vui lòng chọn Team.')));
+        return;
+      }
+      targetCheckId = _selectedTeamId!;
+      targetCollection = 'teams';
+      targetName = 'Team này';
+    }
+
+    //KIỂM TRA ĐIỂM UY TÍN
+    // Hiển thị loading trong lúc check
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    bool isAllowed = await ReputationUtils.checkAndRecoverReputation(
+      targetId: targetCheckId,
+      collection: targetCollection,
+    );
+
+    Navigator.of(context).pop(); // Tắt loading dialog
+
+    if (!isAllowed) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Điểm uy tín quá thấp!'),
+            content: Text(
+              '$targetName hiện có điểm uy tín dưới 50 nên bị cấm tạo sự kiện.\n\n'
+              'Hệ thống sẽ tự động hồi phục 10 điểm mỗi 24 giờ.\n'
+              'Vui lòng quay lại sau.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Đã hiểu'),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
     // --- (THÊM MỚI) Kiểm tra thời gian trong quá khứ ---
     if (_eventDateTime != null && _eventDateTime!.isBefore(DateTime.now())) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -487,11 +546,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     setState(() {
       _isLoading = true;
     });
-
-    final user = _auth.currentUser;
-    if (user == null) {
-      return;
-    }
 
     try {
       // ... (Logic lấy vị trí GPS, xử lý ảnh giữ nguyên) ...
@@ -581,7 +635,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     }
   }
 
-  // ... (_buildTextField giữ nguyên) ...
   Widget _buildTextField(
     TextEditingController controller,
     String label,

@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'member_list_screen.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -12,7 +13,9 @@ import 'package:rxdart/rxdart.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'create_event_screen.dart';
 import 'event_of_team_screen.dart';
-import '../widgets/custom_dropdown_widget.dart'; // Đã thêm import này
+import '../widgets/custom_dropdown_widget.dart';
+import 'schedule_team_screen.dart';
+import 'review_team_screen.dart';
 
 // Constants
 const Color kPrimaryColor = Color.fromRGBO(7, 7, 112, 1);
@@ -30,16 +33,19 @@ class TeamScreen extends StatefulWidget {
   State<TeamScreen> createState() => _TeamScreenState();
 }
 
-class _TeamScreenState extends State<TeamScreen> {
-  String? _expandedTeamId; //teamId của team đang mở rộng
+// 1. Thêm SingleTickerProviderStateMixin để dùng animation cho TabController
+class _TeamScreenState extends State<TeamScreen>
+    with SingleTickerProviderStateMixin {
+  String? _expandedTeamId;
 
   final _formKey = GlobalKey<FormState>();
   final _teamNameController = TextEditingController();
   final _memberCountController = TextEditingController();
-  // Đã xóa _sportController vì dùng dropdown
   final _joinTeamIdController = TextEditingController();
 
-  // Danh sách môn thể thao (giống bên edit_profile_screen)
+  // 2. Khai báo TabController
+  late TabController _tabController;
+
   final List<String> _sports = [
     'Bóng đá',
     'Bóng chuyền',
@@ -50,14 +56,28 @@ class _TeamScreenState extends State<TeamScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    // 3. Khởi tạo TabController và lắng nghe thay đổi
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      // Khi tab thay đổi, gọi setState để rebuild lại nút FloatingActionButton
+      if (!_tabController.indexIsChanging) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _teamNameController.dispose();
     _memberCountController.dispose();
-    // _sportController.dispose(); // Đã xóa
     _joinTeamIdController.dispose();
+    _tabController.dispose(); // Dispose controller
     super.dispose();
   }
 
+  // ... (Giữ nguyên các hàm logic: _showAddOptions, _showJoinTeamDialog, _handleJoinTeam, v.v...)
   void _showAddOptions() {
     showModalBottomSheet(
       context: context,
@@ -229,15 +249,12 @@ class _TeamScreenState extends State<TeamScreen> {
     }
   }
 
-  // === ĐÃ CHỈNH SỬA HÀM NÀY ĐỂ SỬ DỤNG DROPDOWN ===
   void _showCreateTeamDialog() {
-    // Biến cục bộ lưu sport được chọn trong dialog
     String? selectedSportInDialog;
 
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        // Sử dụng StatefulBuilder để cập nhật UI bên trong Dialog (cho Dropdown)
         return StatefulBuilder(
           builder: (context, setStateDialog) {
             return AlertDialog(
@@ -280,7 +297,6 @@ class _TeamScreenState extends State<TeamScreen> {
                         },
                       ),
                       const SizedBox(height: 20),
-                      // Thay thế TextFormField sport bằng CustomDropdownWidget
                       CustomDropdownWidget(
                         title: 'Sport',
                         items: _sports,
@@ -304,7 +320,6 @@ class _TeamScreenState extends State<TeamScreen> {
                   child: const Text('Create'),
                   onPressed: () async {
                     if (_formKey.currentState!.validate()) {
-                      // Kiểm tra thủ công xem đã chọn sport chưa
                       if (selectedSportInDialog == null) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -330,7 +345,7 @@ class _TeamScreenState extends State<TeamScreen> {
                       final teamName = _teamNameController.text;
                       final memberCount =
                           int.tryParse(_memberCountController.text) ?? 0;
-                      final sport = selectedSportInDialog!; // Lấy từ dropdown
+                      final sport = selectedSportInDialog!;
 
                       try {
                         await FirebaseFirestore.instance.collection('teams').add({
@@ -353,7 +368,6 @@ class _TeamScreenState extends State<TeamScreen> {
                         _formKey.currentState!.reset();
                         _teamNameController.clear();
                         _memberCountController.clear();
-                        // Không cần clear sport controller nữa
                         Navigator.of(context).pop();
                       } catch (e) {
                         if (!mounted) return;
@@ -371,7 +385,6 @@ class _TeamScreenState extends State<TeamScreen> {
       },
     );
   }
-  // =================================================
 
   void _showTeamIdDialog(String teamId) {
     showDialog(
@@ -447,16 +460,14 @@ class _TeamScreenState extends State<TeamScreen> {
 
   Future<void> _updateTeamImage(String teamId) async {
     try {
-      // 1. Chọn ảnh từ thư viện
       final imagePicker = ImagePicker();
       final XFile? pickedFile = await imagePicker.pickImage(
         source: ImageSource.gallery,
         imageQuality: 80,
       );
 
-      if (pickedFile == null) return; // Người dùng hủy
+      if (pickedFile == null) return;
 
-      // 2. Mở màn hình cắt ảnh
       final CroppedFile? croppedFile = await ImageCropper().cropImage(
         sourcePath: pickedFile.path,
         compressFormat: ImageCompressFormat.jpg,
@@ -487,12 +498,10 @@ class _TeamScreenState extends State<TeamScreen> {
         ],
       );
 
-      if (croppedFile == null) return; // Người dùng hủy ở màn hình cắt ảnh
+      if (croppedFile == null) return;
 
-      // 3. Dùng file đã được cắt để tải lên
       File imageFile = File(croppedFile.path);
 
-      // Hiển thị loading
       showDialog(
         context: context,
         builder: (context) => const Center(child: CircularProgressIndicator()),
@@ -510,7 +519,7 @@ class _TeamScreenState extends State<TeamScreen> {
       });
 
       if (!mounted) return;
-      Navigator.of(context).pop(); // Tắt loading
+      Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Team image updated successfully!'),
@@ -519,7 +528,6 @@ class _TeamScreenState extends State<TeamScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      // Tắt loading nếu có lỗi
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
@@ -534,47 +542,47 @@ class _TeamScreenState extends State<TeamScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 4,
-      child: Scaffold(
+    // 4. Xóa DefaultTabController, sử dụng controller thủ công trong Scaffold
+    return Scaffold(
+      backgroundColor: kWhiteColor,
+      appBar: AppBar(
+        title: const Text(
+          'Your Team',
+          style: TextStyle(
+            color: kPrimaryColor,
+            fontWeight: FontWeight.bold,
+            fontSize: 24,
+          ),
+        ),
+        actions: [
+          IconButton(icon: const Icon(Icons.search), onPressed: () {}),
+          IconButton(icon: const Icon(Icons.more_horiz), onPressed: () {}),
+        ],
+        bottom: TabBar(
+          controller: _tabController, // Gán controller
+          labelColor: kAccentColor,
+          unselectedLabelColor: kGreyColor,
+          indicatorColor: kAccentColor,
+          tabs: const [
+            Tab(text: 'Team'),
+            Tab(text: 'Individual'),
+          ],
+        ),
         backgroundColor: kWhiteColor,
-        appBar: AppBar(
-          title: const Text(
-            'Your Team',
-            style: TextStyle(
-              color: kPrimaryColor,
-              fontWeight: FontWeight.bold,
-              fontSize: 24,
-            ),
-          ),
-          actions: [
-            IconButton(icon: const Icon(Icons.search), onPressed: () {}),
-            IconButton(icon: const Icon(Icons.more_horiz), onPressed: () {}),
-          ],
-          bottom: const TabBar(
-            labelColor: kAccentColor,
-            unselectedLabelColor: kGreyColor,
-            indicatorColor: kAccentColor,
-            tabs: [
-              Tab(text: 'Team'),
-              Tab(text: 'Individual'),
-            ],
-          ),
-          backgroundColor: kWhiteColor,
-          elevation: 0,
-        ),
-        body: TabBarView(
-          children: [
-            _buildTeamList(),
-            const Center(child: Text('Individual')),
-          ],
-        ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: _showAddOptions,
-          backgroundColor: kAccentColor,
-          child: const Icon(Icons.add, color: kWhiteColor),
-        ),
+        elevation: 0,
       ),
+      body: TabBarView(
+        controller: _tabController, // Gán controller
+        children: [_buildTeamList(), const _IndividualReviewTab()],
+      ),
+      // 5. Kiểm tra index để ẩn hiện FloatingActionButton
+      floatingActionButton: _tabController.index == 0
+          ? FloatingActionButton(
+              onPressed: _showAddOptions,
+              backgroundColor: kAccentColor,
+              child: const Icon(Icons.add, color: kWhiteColor),
+            )
+          : null, // Trả về null để ẩn nút
     );
   }
 
@@ -613,7 +621,6 @@ class _TeamScreenState extends State<TeamScreen> {
 
         final teams = snapshot.data!.docs;
 
-        // Tự động mở team đầu tiên nếu chưa có team nào được chọn
         if (_expandedTeamId == null && teams.isNotEmpty) {
           _expandedTeamId = teams.first.id;
         }
@@ -631,11 +638,10 @@ class _TeamScreenState extends State<TeamScreen> {
             return GestureDetector(
               onTap: () {
                 setState(() {
-                  // Nếu bấm vào card đang mở thì đóng lại, nếu không thì mở card mới
                   if (_expandedTeamId == teamId) {
-                    _expandedTeamId = null; // Đóng lại
+                    _expandedTeamId = null;
                   } else {
-                    _expandedTeamId = teamId; // Mở ra
+                    _expandedTeamId = teamId;
                   }
                 });
               },
@@ -661,7 +667,6 @@ class _TeamScreenState extends State<TeamScreen> {
   }
 }
 
-// Hoàn thiện lớp TeamCard
 class TeamCard extends StatelessWidget {
   final String teamId;
   final String teamName;
@@ -686,20 +691,17 @@ class TeamCard extends StatelessWidget {
     required this.onUpdateImage,
   });
 
-  // Widget riêng cho icon Chat để quản lý badge
   Widget _buildChatIconWithBadge(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       return const _DetailIcon(icon: Icons.chat_bubble_outline, label: 'Chat');
     }
 
-    // Stream 1: Lắng nghe team document để lấy lastMessageTimestamp
     final teamStream = FirebaseFirestore.instance
         .collection('teams')
         .doc(teamId)
         .snapshots();
 
-    // Stream 2: Lắng nghe user read status để lấy lastReadTimestamp
     final userReadStream = FirebaseFirestore.instance
         .collection('users')
         .doc(currentUser.uid)
@@ -707,7 +709,6 @@ class TeamCard extends StatelessWidget {
         .doc(teamId)
         .snapshots();
 
-    // Kết hợp 2 stream bằng rxdart
     return StreamBuilder<List<DocumentSnapshot>>(
       stream: Rx.combineLatest2(
         teamStream,
@@ -725,14 +726,12 @@ class TeamCard extends StatelessWidget {
               teamData?['lastMessageTimestamp'] as Timestamp?;
 
           if (lastMessageTimestamp != null) {
-            // Nếu user chưa bao giờ đọc chat này
             if (!userReadDoc.exists) {
               hasNewMessage = true;
             } else {
               final userReadData = userReadDoc.data() as Map<String, dynamic>?;
               final lastReadTimestamp =
                   userReadData?['lastReadTimestamp'] as Timestamp?;
-              // Nếu tin nhắn cuối cùng mới hơn lần đọc cuối cùng
               if (lastReadTimestamp == null ||
                   lastMessageTimestamp.compareTo(lastReadTimestamp) > 0) {
                 hasNewMessage = true;
@@ -762,7 +761,7 @@ class TeamCard extends StatelessWidget {
       },
       {'icon': Icons.add_circle_outline, 'label': 'Create Event'},
       {'icon': Icons.event_available_outlined, 'label': 'Events'},
-      {'icon': Icons.assessment_outlined, 'label': 'Statistics'},
+      {'icon': Icons.rate_review_outlined, 'label': 'Reviews'},
     ];
 
     return Card(
@@ -935,6 +934,25 @@ class TeamCard extends StatelessWidget {
                             ),
                           ),
                         );
+                      } else if (item['label'] == 'Schedule') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ScheduleTeamScreen(
+                              teamId: teamId,
+                              teamName: teamName,
+                              isUserOwner: isOwner,
+                            ),
+                          ),
+                        );
+                      } else if (item['label'] == 'Reviews') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                ReviewTeamScreen(teamId: teamId),
+                          ),
+                        );
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -1003,6 +1021,384 @@ class _DetailIcon extends StatelessWidget {
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(fontSize: 12)),
       ],
+    );
+  }
+}
+
+// --- WIDGET TAB INDIVIDUAL REVIEW ---
+class _IndividualReviewTab extends StatelessWidget {
+  const _IndividualReviewTab();
+
+  Color _getScoreColor(int score) {
+    if (score >= 90) return Colors.green;
+    if (score >= 75) return Colors.blue;
+    if (score >= 50) return Colors.orange;
+    return Colors.red;
+  }
+
+  String _getReasonText(String reason) {
+    switch (reason) {
+      case 'good':
+        return 'Đúng hẹn';
+      case 'late':
+        return 'Đến muộn';
+      case 'no_show':
+        return 'Vắng mặt';
+      default:
+        return reason;
+    }
+  }
+
+  Color _getReasonColor(String reason) {
+    switch (reason) {
+      case 'good':
+        return Colors.green;
+      case 'late':
+        return Colors.orange;
+      case 'no_show':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return const Center(child: Text("Vui lòng đăng nhập để xem đánh giá."));
+    }
+
+    return Container(
+      color: Colors.grey[100],
+      child: SingleChildScrollView(
+        child: Column(
+          children: [
+            _buildUserHeader(user.uid),
+            const SizedBox(height: 16),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Lịch sử đánh giá cá nhân",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            _buildReviewsList(user.uid),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserHeader(String uid) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const SizedBox(
+            height: 200,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final data = snapshot.data!.data() as Map<String, dynamic>?;
+        if (data == null)
+          return const Center(child: Text("Không tìm thấy dữ liệu User"));
+
+        final int reputationScore = data['reputationScore'] ?? 100;
+        final int goodCount = data['goodCount'] ?? 0;
+        final int lateCount = data['lateCount'] ?? 0;
+        final int noShowCount = data['noShowCount'] ?? 0;
+        final String displayName = data['displayName'] ?? 'User';
+        final String photoUrl = data['photoUrl'] ?? '';
+
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.grey.shade200),
+                      image: photoUrl.isNotEmpty
+                          ? DecorationImage(
+                              image: NetworkImage(photoUrl),
+                              fit: BoxFit.cover,
+                            )
+                          : null,
+                    ),
+                    child: photoUrl.isEmpty
+                        ? const Icon(Icons.person, size: 40, color: Colors.grey)
+                        : null,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          displayName,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _getScoreColor(
+                              reputationScore,
+                            ).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            "Điểm uy tín: $reputationScore",
+                            style: TextStyle(
+                              color: _getScoreColor(reputationScore),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildStatItem("Đúng hẹn", goodCount, Colors.green),
+                  _buildStatItem("Đến muộn", lateCount, Colors.orange),
+                  _buildStatItem("Vắng mặt", noShowCount, Colors.red),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatItem(String label, int count, Color color) {
+    return Column(
+      children: [
+        Text(
+          count.toString(),
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReviewsList(String uid) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('reviews')
+          .where('targetId', isEqualTo: uid)
+          .where('targetType', isEqualTo: 'user')
+          .orderBy('createdAt', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.only(top: 20),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(40),
+            alignment: Alignment.center,
+            child: Column(
+              children: const [
+                Icon(Icons.rate_review_outlined, size: 50, color: Colors.grey),
+                SizedBox(height: 10),
+                Text(
+                  "Chưa có đánh giá cá nhân nào.",
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          itemCount: snapshot.data!.docs.length,
+          itemBuilder: (context, index) {
+            final doc = snapshot.data!.docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+            return _buildReviewItem(data);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildReviewItem(Map<String, dynamic> reviewData) {
+    final String reason = reviewData['reason'] ?? 'good';
+    final String comment = reviewData['comment'] ?? '';
+    final String reviewerId = reviewData['reviewerId'] ?? '';
+    final Timestamp? createdAt = reviewData['createdAt'];
+
+    final String dateString = createdAt != null
+        ? DateFormat('dd/MM/yyyy HH:mm').format(createdAt.toDate())
+        : 'Unknown Date';
+
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('users')
+          .doc(reviewerId)
+          .get(),
+      builder: (context, userSnapshot) {
+        String reviewerName = "Người dùng ẩn danh";
+        String? reviewerImage;
+
+        if (userSnapshot.hasData && userSnapshot.data!.exists) {
+          final userData = userSnapshot.data!.data() as Map<String, dynamic>;
+          reviewerName = userData['displayName'] ?? reviewerName;
+          reviewerImage = userData['photoUrl'];
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundImage:
+                        (reviewerImage != null && reviewerImage.isNotEmpty)
+                        ? NetworkImage(reviewerImage)
+                        : null,
+                    backgroundColor: Colors.blue.shade100,
+                    child: (reviewerImage == null || reviewerImage.isEmpty)
+                        ? Text(
+                            reviewerName.isNotEmpty
+                                ? reviewerName[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(color: Colors.blue),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          reviewerName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        Text(
+                          dateString,
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _getReasonColor(reason).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _getReasonColor(reason).withOpacity(0.3),
+                      ),
+                    ),
+                    child: Text(
+                      _getReasonText(reason),
+                      style: TextStyle(
+                        color: _getReasonColor(reason),
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (comment.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    comment,
+                    style: const TextStyle(fontSize: 14, color: Colors.black87),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }

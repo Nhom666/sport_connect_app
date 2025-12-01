@@ -151,46 +151,91 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('joinRequests')
-          .where('ownerId', isEqualTo: currentUser.uid)
-          .where('status', isEqualTo: 'pending')
-          .snapshots(),
-      builder: (context, snapshot) {
-        final hasNotifications =
-            snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+    // Stream 1: Yêu cầu xin vào đội (Requests)
+    final requestsStream = FirebaseFirestore.instance
+        .collection('joinRequests')
+        .where('ownerId', isEqualTo: currentUser.uid)
+        .where('status', isEqualTo: 'pending')
+        .snapshots();
 
-        return InkWell(
-          onTap: () => Navigator.of(
-            context,
-          ).push(MaterialPageRoute(builder: (context) => const NoticeScreen())),
-          borderRadius: BorderRadius.circular(50),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Icon(
-                  Icons.notifications_none,
-                  color: Colors.grey[700],
-                  size: 26,
-                ),
-                if (hasNotifications)
-                  Positioned(
-                    top: -2,
-                    right: -2,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
+    // Stream 2: Lời mời vào đội (Invitations)
+    final invitationsStream = FirebaseFirestore.instance
+        .collection('teamInvitations')
+        .where('inviteeId', isEqualTo: currentUser.uid)
+        .where('status', isEqualTo: 'pending')
+        .snapshots();
+
+    // Stream 3: Yêu cầu kết bạn (Friends) - Lắng nghe thay đổi của User Doc
+    final friendRequestStream = FirebaseFirestore.instance
+        .collection('users')
+        .doc(currentUser.uid)
+        .snapshots();
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: requestsStream,
+      builder: (context, requestSnapshot) {
+        return StreamBuilder<QuerySnapshot>(
+          stream: invitationsStream,
+          builder: (context, inviteSnapshot) {
+            return StreamBuilder<DocumentSnapshot>(
+              stream: friendRequestStream,
+              builder: (context, userSnapshot) {
+                // Kiểm tra logic có thông báo hay không
+                bool hasRequests =
+                    requestSnapshot.hasData &&
+                    requestSnapshot.data!.docs.isNotEmpty;
+                bool hasInvites =
+                    inviteSnapshot.hasData &&
+                    inviteSnapshot.data!.docs.isNotEmpty;
+
+                bool hasFriendRequests = false;
+                if (userSnapshot.hasData && userSnapshot.data!.exists) {
+                  final data =
+                      userSnapshot.data!.data() as Map<String, dynamic>?;
+                  final List requests = data?['friendRequestsReceived'] ?? [];
+                  if (requests.isNotEmpty) hasFriendRequests = true;
+                }
+
+                // Nếu 1 trong 3 cái có dữ liệu -> Hiện chấm đỏ
+                final hasAnyNotification =
+                    hasRequests || hasInvites || hasFriendRequests;
+
+                return InkWell(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const NoticeScreen(),
                     ),
                   ),
-              ],
-            ),
-          ),
+                  borderRadius: BorderRadius.circular(50),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Icon(
+                          Icons.notifications_none,
+                          color: Colors.grey[700],
+                          size: 26,
+                        ),
+                        if (hasAnyNotification)
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
         );
       },
     );

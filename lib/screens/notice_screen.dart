@@ -18,7 +18,6 @@ class _NoticeScreenState extends State<NoticeScreen> {
     String teamId,
     String requesterId,
   ) async {
-    // TODO: Thêm logic kiểm tra team có bị đầy không trước khi accept
     if (!mounted) return;
     setState(() => _isProcessing = true);
     final scaffoldMessenger = ScaffoldMessenger.of(context);
@@ -148,7 +147,7 @@ class _NoticeScreenState extends State<NoticeScreen> {
     }
   }
 
-  // --- THÊM MỚI: HÀM XỬ LÝ TEAM INVITATION (Mời vào đội) ---
+  // --- HÀM XỬ LÝ TEAM INVITATION (Mời vào đội) ---
   Future<void> _acceptTeamInvitation(String invitationId, String teamId) async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null || !mounted) return;
@@ -159,7 +158,6 @@ class _NoticeScreenState extends State<NoticeScreen> {
     final firestore = FirebaseFirestore.instance;
 
     try {
-      // Dùng Transaction để ĐỌC (check team full) rồi GHI an toàn
       await firestore.runTransaction((transaction) async {
         final teamRef = firestore.collection('teams').doc(teamId);
         final teamDoc = await transaction.get(teamRef);
@@ -172,25 +170,20 @@ class _NoticeScreenState extends State<NoticeScreen> {
         final List<String> members = List<String>.from(
           teamData['members'] ?? [],
         );
-        final int maxMembers =
-            (teamData['memberCount'] as num?)?.toInt() ?? 5; // Lấy từ logic cũ
+        final int maxMembers = (teamData['memberCount'] as num?)?.toInt() ?? 5;
 
-        // CHECK QUAN TRỌNG: Kiểm tra xem team có đầy không
         if (members.length >= maxMembers) {
           throw Exception("Đội này đã đầy.");
         }
 
-        // Nếu chưa full, tiếp tục
         final inviteRef = firestore
             .collection('teamInvitations')
             .doc(invitationId);
 
-        // 1. Thêm user vào mảng members của đội
         transaction.update(teamRef, {
           'members': FieldValue.arrayUnion([currentUserId]),
         });
 
-        // 2. Cập nhật status của lời mời
         transaction.update(inviteRef, {'status': 'accepted'});
       });
 
@@ -232,44 +225,136 @@ class _NoticeScreenState extends State<NoticeScreen> {
     }
   }
 
+  // --- GIAO DIỆN CHÍNH ---
   @override
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
 
+    if (currentUser == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Notifications')),
+        body: const Center(child: Text('Please log in to see notifications.')),
+      );
+    }
+
+    final uid = currentUser.uid;
+
     return DefaultTabController(
-      length: 3, // 3 Tab
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Notifications'),
+          title: const Text(
+            'Notifications',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Color.fromRGBO(7, 7, 112, 1),
+            ),
+          ),
           backgroundColor: Colors.white,
           elevation: 1,
           foregroundColor: Colors.black,
-          bottom: const TabBar(
+          // CẬP NHẬT: TabBar sử dụng _buildBadgeTab
+          bottom: TabBar(
+            labelColor: const Color.fromRGBO(7, 7, 112, 1),
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: const Color.fromRGBO(7, 7, 112, 1),
             tabs: [
-              Tab(text: 'Requests'),
-              Tab(text: 'Friends'),
-              Tab(text: 'Invitations'),
+              // Tab Requests: Nghe joinRequests
+              _buildBadgeTab(
+                label: 'Requests',
+                stream: FirebaseFirestore.instance
+                    .collection('joinRequests')
+                    .where('ownerId', isEqualTo: uid)
+                    .where('status', isEqualTo: 'pending')
+                    .snapshots(),
+              ),
+              // Tab Friends: Nghe user doc
+              _buildBadgeTab(
+                label: 'Friends',
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(uid)
+                    .snapshots(),
+                isUserDoc: true, // Đánh dấu đây là User Doc
+              ),
+              // Tab Invitations: Nghe teamInvitations
+              _buildBadgeTab(
+                label: 'Invitations',
+                stream: FirebaseFirestore.instance
+                    .collection('teamInvitations')
+                    .where('inviteeId', isEqualTo: uid)
+                    .where('status', isEqualTo: 'pending')
+                    .snapshots(),
+              ),
             ],
           ),
         ),
-        // SỬA ĐỔI: Thay body bằng TabBarView
-        body: currentUser == null
-            ? const Center(child: Text('Please log in to see notifications.'))
-            : TabBarView(
-                children: [
-                  // Tab 1: Team Requests
-                  _buildTeamRequestsList(currentUser),
-                  // Tab 2: Friend Requests
-                  _buildFriendRequestsList(currentUser),
-                  // Tab 3: Team Invitations (THÊM MỚI)
-                  _buildTeamInvitationsList(currentUser),
-                ],
-              ),
+        body: TabBarView(
+          children: [
+            _buildTeamRequestsList(currentUser),
+            _buildFriendRequestsList(currentUser),
+            _buildTeamInvitationsList(currentUser),
+          ],
+        ),
       ),
     );
   }
 
-  // --- WIDGET CHO TAB 1 (Team Requests - Xin vào đội) ---
+  // --- HELPER WIDGET: TẠO TAB CÓ CHẤM ĐỎ ---
+  Widget _buildBadgeTab({
+    required String label,
+    required Stream stream,
+    bool isUserDoc = false,
+  }) {
+    return StreamBuilder(
+      stream: stream,
+      builder: (context, snapshot) {
+        bool showDot = false;
+
+        if (snapshot.hasData) {
+          if (isUserDoc) {
+            // Logic cho Friends (User Doc)
+            final doc = snapshot.data as DocumentSnapshot;
+            if (doc.exists) {
+              final data = doc.data() as Map<String, dynamic>?;
+              final list = data?['friendRequestsReceived'] ?? [];
+              if (list is List && list.isNotEmpty) showDot = true;
+            }
+          } else {
+            // Logic cho Requests & Invitations (QuerySnapshot)
+            final query = snapshot.data as QuerySnapshot;
+            if (query.docs.isNotEmpty) showDot = true;
+          }
+        }
+
+        // Return Tab chứa Text và Dot
+        return Tab(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label),
+              if (showDot) ...[
+                const SizedBox(width: 6),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ... (Các widget list bên dưới giữ nguyên logic như cũ) ...
+
   Widget _buildTeamRequestsList(User currentUser) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -281,9 +366,6 @@ class _NoticeScreenState extends State<NoticeScreen> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return const Center(child: Text('Something went wrong.'));
         }
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return const Center(child: Text('No new team requests.'));
@@ -360,7 +442,6 @@ class _NoticeScreenState extends State<NoticeScreen> {
     );
   }
 
-  // --- WIDGET CHO TAB 2 (Friend Requests - Kết bạn) ---
   Widget _buildFriendRequestsList(User currentUser) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
@@ -371,11 +452,8 @@ class _NoticeScreenState extends State<NoticeScreen> {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (snapshot.hasError) {
-          return const Center(child: Text('Something went wrong.'));
-        }
         if (!snapshot.hasData || !snapshot.data!.exists) {
-          return const Center(child: Text('Could not find user data.'));
+          return const Center(child: Text('No new friend requests.'));
         }
 
         final data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
@@ -404,22 +482,17 @@ class _NoticeScreenState extends State<NoticeScreen> {
     );
   }
 
-  // --- THÊM MỚI: WIDGET CHO TAB 3 (Team Invitations - Mời vào đội) ---
   Widget _buildTeamInvitationsList(User currentUser) {
     return StreamBuilder<QuerySnapshot>(
-      // Truy vấn collection `teamInvitations`
       stream: FirebaseFirestore.instance
           .collection('teamInvitations')
-          .where('inviteeId', isEqualTo: currentUser.uid) // Mời BẠN
-          .where('status', isEqualTo: 'pending') // Đang chờ
+          .where('inviteeId', isEqualTo: currentUser.uid)
+          .where('status', isEqualTo: 'pending')
           .orderBy('createdAt', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return const Center(child: Text('Something went wrong.'));
         }
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
           return const Center(child: Text('No new team invitations.'));
@@ -451,12 +524,12 @@ class _NoticeScreenState extends State<NoticeScreen> {
                         ).style.copyWith(fontSize: 15),
                         children: <TextSpan>[
                           TextSpan(
-                            text: data['inviterName'], // Tên người mời
+                            text: data['inviterName'],
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           const TextSpan(text: ' invited you to join team '),
                           TextSpan(
-                            text: '"${data['teamName']}"', // Tên đội
+                            text: '"${data['teamName']}"',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                         ],
@@ -496,8 +569,6 @@ class _NoticeScreenState extends State<NoticeScreen> {
   }
 }
 
-// --- WIDGET ĐỂ HIỂN THỊ MỘT FRIEND REQUEST ---
-// (Giữ nguyên, không thay đổi)
 class _FriendRequestTile extends StatelessWidget {
   final String requesterId;
   final bool isProcessing;
@@ -520,13 +591,9 @@ class _FriendRequestTile extends StatelessWidget {
           .get(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: ListTile(
-              leading: const CircleAvatar(child: CircularProgressIndicator()),
-              title: Container(height: 16, color: Colors.grey.shade200),
-              subtitle: Container(height: 12, color: Colors.grey.shade200),
-            ),
+          return const Card(
+            margin: EdgeInsets.only(bottom: 12),
+            child: ListTile(title: Text("Loading...")),
           );
         }
         if (!snapshot.hasData || !snapshot.data!.exists) {

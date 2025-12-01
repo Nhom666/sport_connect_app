@@ -5,6 +5,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'user_profile_screen.dart';
 import '../utils/constants.dart';
+import 'details_match_screen.dart';
+import 'review_team_screen.dart';
+import '../service/notification_service.dart';
 
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
@@ -38,32 +41,33 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   void initState() {
     super.initState();
-    _selectedDay = _focusedDay; // Chọn ngày hôm nay làm mặc định
+    _selectedDay = _focusedDay;
     if (_auth.currentUser != null) {
       _controlledIdsFuture = _getControlledOrganizerIds(_auth.currentUser!.uid);
     }
+    // Khởi tạo notification service
+    _initNotifications();
   }
 
-  // --- (THÊM MỚI) Hàm để tải lại dữ liệu ---
+  Future<void> _initNotifications() async {
+    final notificationService = NotificationService();
+    await notificationService.init();
+    await notificationService.requestPermissions();
+  }
+
   Future<void> _refreshData() async {
     if (_auth.currentUser != null) {
-      // 1. Tạo một Future MỚI
       final newIdsFuture = _getControlledOrganizerIds(_auth.currentUser!.uid);
-
-      // 2. Cập nhật state để FutureBuilder nhận diện và tải lại
       setState(() {
         _controlledIdsFuture = newIdsFuture;
       });
-
-      // 3. Đợi Future mới hoàn thành để vòng xoay (indicator) biến mất
       await newIdsFuture;
     }
-    // Nếu không đăng nhập, chỉ cần hoàn thành
     return;
   }
-  // ------------------------------------------
 
   Future<List<String>> _getControlledOrganizerIds(String uid) async {
+    // List này bao gồm cả UID cá nhân VÀ các Team ID mà user làm chủ
     List<String> controlledIds = [uid];
     final teamsQuery = await _firestore
         .collection('teams')
@@ -96,7 +100,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   String _formatEventDateHeader(Timestamp? timestamp) {
     if (timestamp == null) return 'Unknown Date';
-    return DateFormat('EEEE MMM d').format(timestamp.toDate());
+    return DateFormat('EEEE, dd/MM/yyyy').format(timestamp.toDate());
   }
 
   DateTime _normalizeDate(DateTime date) {
@@ -110,7 +114,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       child: Scaffold(
         backgroundColor: Colors.white,
         appBar: AppBar(
-          // ... (AppBar giữ nguyên) ...
           automaticallyImplyLeading: false,
           title: const Text(
             'Schedule',
@@ -144,7 +147,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  // --- (CẬP NHẬT) _buildTimelineView với RefreshIndicator ---
   Widget _buildTimelineView() {
     if (_auth.currentUser == null) {
       return const Center(child: Text('Vui lòng đăng nhập.'));
@@ -162,17 +164,22 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
         final controlledIds = idSnapshot.data!;
 
+        // Incoming: User/Team của mình LÀ CHỦ sự kiện (người khác xin vào)
         final incomingStream = _firestore
             .collection('joinRequests')
             .where('eventOwnerId', whereIn: controlledIds)
             .orderBy('eventTime', descending: false)
             .snapshots();
 
+        // Outgoing: User/Team của mình ĐI XIN vào sự kiện người khác
+        // --- SỬA Ở ĐÂY: Thay vì chỉ check uid, ta check trong controlledIds ---
+        // Điều này đảm bảo nếu Team đi xin (requesterId == teamId), nó vẫn hiện ra.
         final outgoingStream = _firestore
             .collection('joinRequests')
-            .where('requesterId', isEqualTo: _auth.currentUser!.uid)
+            .where('requesterId', whereIn: controlledIds)
             .orderBy('eventTime', descending: false)
             .snapshots();
+        // ---------------------------------------------------------------------
 
         return StreamBuilder<QuerySnapshot>(
           stream: incomingStream,
@@ -186,30 +193,39 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
                 final incomingDocs = incomingSnapshot.data?.docs ?? [];
                 final outgoingDocs = outgoingSnapshot.data?.docs ?? [];
+
+                // Gộp danh sách
                 final allRequests = <DocumentSnapshot>[
                   ...incomingDocs,
                   ...outgoingDocs,
                 ];
 
+                // Lọc trùng lặp (đề phòng trường hợp user tự request sự kiện của chính mình)
+                final uniqueRequests = {
+                  for (var doc in allRequests) doc.id: doc,
+                }.values.toList();
+
                 final filteredRequests = (_selectedSport == 'All')
-                    ? allRequests
-                    : allRequests.where((doc) {
+                    ? uniqueRequests
+                    : uniqueRequests.where((doc) {
                         return (doc.data()
                                 as Map<String, dynamic>)['eventSport'] ==
                             _selectedSport;
                       }).toList();
 
-                // Sắp xếp
                 filteredRequests.sort((a, b) {
                   Timestamp? aTime =
                       (a.data() as Map<String, dynamic>)['eventTime'];
                   Timestamp? bTime =
                       (b.data() as Map<String, dynamic>)['eventTime'];
                   if (aTime == null || bTime == null) return 0;
-                  return bTime.compareTo(aTime);
+                  return bTime.compareTo(
+                    aTime,
+                  ); // Sắp xếp giảm dần? (Mới nhất lên đầu)
+                  // Lưu ý: Code gốc của bạn là bTime.compareTo(aTime) => Giảm dần (Xa nhất -> Gần nhất)
+                  // Nếu muốn Gần nhất -> Xa nhất thì đổi thành aTime.compareTo(bTime)
                 });
 
-                // --- (BẮT ĐẦU THAY ĐỔI) ---
                 return Column(
                   children: [
                     _buildSportFilterChips(),
@@ -217,8 +233,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       child: RefreshIndicator(
                         onRefresh: _refreshData,
                         child: (filteredRequests.isEmpty)
-                            // Nếu rỗng, hiển thị 1 ListView có thể cuộn
-                            // để RefreshIndicator hoạt động
                             ? Stack(
                                 children: [
                                   ListView(
@@ -232,7 +246,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                   ),
                                 ],
                               )
-                            // Nếu không rỗng, hiển thị danh sách
                             : _buildGroupedListView(
                                 filteredRequests,
                                 controlledIds,
@@ -241,7 +254,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     ),
                   ],
                 );
-                // --- (KẾT THÚC THAY ĐỔI) ---
               },
             );
           },
@@ -250,7 +262,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  // --- (Hàm _buildSportFilterChips giữ nguyên) ---
+  // ... (Giữ nguyên _buildSportFilterChips, _buildGroupedListView, _buildDateHeader) ...
   Widget _buildSportFilterChips() {
     return Container(
       height: 60,
@@ -324,7 +336,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  // --- (CẬP NHẬT) _buildGroupedListView với physics ---
   Widget _buildGroupedListView(
     List<DocumentSnapshot> requests,
     List<String> controlledIds,
@@ -332,10 +343,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     String? lastDateHeader;
 
     return ListView.builder(
-      // --- (THÊM MỚI) ---
-      // Đảm bảo ListView luôn cuộn được để kích hoạt RefreshIndicator
       physics: const AlwaysScrollableScrollPhysics(),
-      // -----------------
       padding: const EdgeInsets.all(kDefaultPadding),
       itemCount: requests.length,
       itemBuilder: (context, index) {
@@ -367,7 +375,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
-  // --- (Hàm _buildDateHeader giữ nguyên) ---
   Widget _buildDateHeader(String dateText) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -385,8 +392,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       ),
     );
   }
+  // ...
 
-  // --- (CẬP NHẬT) Widget cho "Calendar View" với RefreshIndicator ---
   Widget _buildCalendarView() {
     if (_auth.currentUser == null) {
       return const Center(child: Text('Vui lòng đăng nhập.'));
@@ -400,21 +407,18 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         }
         final controlledIds = idSnapshot.data!;
 
-        // 1. Stream Yêu cầu đến (accepted hoặc pending)
         final incomingStream = _firestore
             .collection('joinRequests')
             .where('eventOwnerId', whereIn: controlledIds)
-            //.where('status', whereIn: ['pending', 'accepted'])
             .snapshots();
 
-        // 2. Stream Yêu cầu đi (accepted hoặc pending)
+        // --- SỬA Ở ĐÂY TƯƠNG TỰ: Dùng whereIn controlledIds ---
         final outgoingStream = _firestore
             .collection('joinRequests')
-            .where('requesterId', isEqualTo: _auth.currentUser!.uid)
-            //.where('status', whereIn: ['pending', 'accepted'])
+            .where('requesterId', whereIn: controlledIds)
             .snapshots();
+        // -----------------------------------------------------
 
-        // 3. Lồng 2 StreamBuilder
         return StreamBuilder<QuerySnapshot>(
           stream: incomingStream,
           builder: (context, incomingSnapshot) {
@@ -427,12 +431,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
                 final incomingDocs = incomingSnapshot.data?.docs ?? [];
                 final outgoingDocs = outgoingSnapshot.data?.docs ?? [];
-                final allRequests = <DocumentSnapshot>[
-                  ...incomingDocs,
-                  ...outgoingDocs,
-                ];
 
-                // 4. Xử lý dữ liệu cho Calendar
+                // Gộp và lọc trùng (Set)
+                final allRequests = {
+                  for (var doc in [...incomingDocs, ...outgoingDocs])
+                    doc.id: doc,
+                }.values.toList();
+
                 final eventsByDay = <DateTime, List<DocumentSnapshot>>{};
                 for (final doc in allRequests) {
                   final data = doc.data() as Map<String, dynamic>;
@@ -446,11 +451,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   }
                 }
 
-                // 5. Lấy danh sách sự kiện cho ngày đã chọn
                 final selectedDayEvents =
                     eventsByDay[_normalizeDate(_selectedDay!)] ?? [];
 
-                // 6. Build UI: Lịch + Danh sách
                 return Column(
                   children: [
                     Padding(
@@ -460,7 +463,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         child: TextButton(
                           onPressed: () {
                             final now = DateTime.now();
-                            // Cập nhật lại ngày được chọn và ngày focus
                             setState(() {
                               _selectedDay = now;
                               _focusedDay = now;
@@ -495,16 +497,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           _calendarFormat = format;
                         });
                       },
-                      // Dùng eventLoader để cung cấp dữ liệu
                       eventLoader: (day) {
                         return eventsByDay[_normalizeDate(day)] ?? [];
                       },
-                      // Build UI cho các marker (emoji)
                       calendarBuilders: CalendarBuilders(
                         markerBuilder: (context, day, events) {
                           if (events.isEmpty) return null;
-
-                          // Lấy các môn thể thao (không trùng lặp)
                           final sports = (events as List<DocumentSnapshot>)
                               .map((doc) => (doc.data() as Map)['eventSport'])
                               .toSet();
@@ -512,7 +510,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           return Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: sports.take(4).map((sport) {
-                              // Giới hạn 4 icon
                               return Text(
                                 _getSportVisual(sport as String?),
                                 style: const TextStyle(fontSize: 10),
@@ -523,13 +520,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       ),
                     ),
                     const Divider(height: 1),
-                    // --- (BẮT ĐẦU THAY ĐỔI) ---
-                    // Danh sách sự kiện của ngày đã chọn
                     Expanded(
                       child: RefreshIndicator(
                         onRefresh: _refreshData,
                         child: (selectedDayEvents.isEmpty)
-                            // Nếu rỗng, hiển thị ListView có thể cuộn
                             ? Stack(
                                 children: [
                                   ListView(
@@ -543,7 +537,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                   ),
                                 ],
                               )
-                            // Nếu không rỗng, hiển thị danh sách
                             : ListView.builder(
                                 physics: const AlwaysScrollableScrollPhysics(),
                                 padding: const EdgeInsets.all(kDefaultPadding),
@@ -564,7 +557,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               ),
                       ),
                     ),
-                    // --- (KẾT THÚC THAY ĐỔI) ---
                   ],
                 );
               },
@@ -575,9 +567,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 }
-// ---------------------------------------------------
 
-// --- (Class _ScheduleItemCard giữ nguyên) ---
+// ... (Giữ nguyên _ScheduleItemCard) ...
 class _ScheduleItemCard extends StatelessWidget {
   final DocumentSnapshot joinRequestDoc;
   final bool isIncoming;
@@ -602,14 +593,35 @@ class _ScheduleItemCard extends StatelessWidget {
         ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sẽ mở trang chi tiết Team (ID: $requesterId)')),
+      // Đã sửa: Chuyển hướng sang ReviewTeamScreen khi requesterType là team
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ReviewTeamScreen(teamId: requesterId),
+        ),
       );
     }
   }
 
   Future<void> _updateRequestStatus(String status) async {
     await joinRequestDoc.reference.update({'status': status});
+
+    // Lên lịch thông báo khi accept
+    if (status == 'accepted') {
+      final data = joinRequestDoc.data() as Map<String, dynamic>;
+      final eventId = data['eventId'] as String?;
+      final eventName = data['eventName'] as String? ?? 'Sự kiện';
+      final eventTime = data['eventTime'] as Timestamp?;
+
+      if (eventId != null && eventTime != null) {
+        final notificationService = NotificationService();
+        await notificationService.scheduleEventReminders(
+          eventId: eventId,
+          eventName: eventName,
+          eventTime: eventTime.toDate(),
+        );
+      }
+    }
   }
 
   Widget _buildStatusChip(String text, Color color) {
@@ -732,6 +744,7 @@ class _ScheduleItemCard extends StatelessWidget {
         case 'pending':
           statusButton = InkWell(
             onTap: () {
+              // Action sheet
               _showActionSheet(context, data);
             },
             borderRadius: BorderRadius.circular(8),
@@ -763,7 +776,7 @@ class _ScheduleItemCard extends StatelessWidget {
         case 'regretted':
           statusButton = _buildStatusChip('Regretted', Colors.red);
           break;
-        case 'cancelled': // <-- THÊM MỚI
+        case 'cancelled':
           statusButton = _buildStatusChip('Cancelled', Colors.red);
           break;
         default:
@@ -788,52 +801,104 @@ class _ScheduleItemCard extends StatelessWidget {
       }
     }
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12.0),
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12.0),
-        border: Border.all(color: Colors.grey.shade300, width: 1),
-      ),
-      child: Row(
-        children: [
-          Text(sportVisual, style: const TextStyle(fontSize: 24)),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  eventName,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(Icons.access_time, color: Colors.grey[600], size: 14),
-                    const SizedBox(width: 4),
-                    Text(timeString, style: TextStyle(color: Colors.grey[600])),
-                    const SizedBox(width: 12),
-                    Icon(Icons.location_on, color: Colors.grey[600], size: 14),
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(
-                        location,
-                        style: TextStyle(color: Colors.grey[600]),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+    return InkWell(
+      onTap: () async {
+        final String? eventId = data['eventId'];
+        if (eventId == null || eventId.isEmpty) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Không tìm thấy ID sự kiện.')),
+            );
+          }
+          return;
+        }
+
+        try {
+          final eventDoc = await FirebaseFirestore.instance
+              .collection('events')
+              .doc(eventId)
+              .get();
+
+          if (eventDoc.exists && context.mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => DetailsMatchScreen(eventDoc: eventDoc),
+              ),
+            );
+          } else if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Sự kiện này đã bị xóa hoặc không tồn tại.'),
+              ),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Lỗi tải sự kiện: $e')));
+          }
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12.0),
+        padding: const EdgeInsets.all(16.0),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12.0),
+          border: Border.all(color: Colors.grey.shade300, width: 1),
+        ),
+        child: Row(
+          children: [
+            Text(sportVisual, style: const TextStyle(fontSize: 24)),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    eventName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.access_time,
+                        color: Colors.grey[600],
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        timeString,
+                        style: TextStyle(color: Colors.grey[600]),
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(
+                        Icons.location_on,
+                        color: Colors.grey[600],
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          location,
+                          style: TextStyle(color: Colors.grey[600]),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-          statusButton,
-        ],
+            statusButton,
+          ],
+        ),
       ),
     );
   }
