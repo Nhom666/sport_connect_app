@@ -8,6 +8,7 @@ import '../utils/constants.dart';
 import 'details_match_screen.dart';
 import 'review_team_screen.dart';
 import '../service/notification_service.dart';
+import '../service/alarm_notification_service.dart';
 
 class ScheduleTeamScreen extends StatefulWidget {
   final String teamId;
@@ -44,6 +45,97 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
     final notificationService = NotificationService();
     await notificationService.init();
     await notificationService.requestPermissions();
+
+    // Khởi tạo AlarmNotificationService
+    final alarmService = AlarmNotificationService();
+    await alarmService.init();
+
+    // Lắng nghe các request của team này được accept
+    _listenForAcceptedRequests();
+  }
+
+  void _listenForAcceptedRequests() {
+    // Lắng nghe joinRequests mà team này là requester và được accept
+    _firestore
+        .collection('joinRequests')
+        .where('requesterId', isEqualTo: widget.teamId)
+        .where('status', isEqualTo: 'accepted')
+        .snapshots()
+        .listen((snapshot) {
+          for (var change in snapshot.docChanges) {
+            if (change.type == DocumentChangeType.modified ||
+                change.type == DocumentChangeType.added) {
+              final data = change.doc.data();
+              if (data != null) {
+                final eventId = data['eventId'] as String?;
+                final eventName = data['eventName'] as String? ?? 'Sự kiện';
+                final eventTime = data['eventTime'] as Timestamp?;
+                final requesterId = data['requesterId'] as String?;
+                final eventOwnerId = data['eventOwnerId'] as String?;
+
+                if (eventId != null && eventTime != null) {
+                  // Lên lịch thông báo cho TẤT CẢ members của 2 team
+                  _scheduleNotificationsForBothTeams(
+                    eventId: eventId,
+                    eventName: eventName,
+                    eventTime: eventTime.toDate(),
+                    requesterTeamId: requesterId,
+                    ownerTeamId: eventOwnerId,
+                  );
+                }
+              }
+            }
+          }
+        });
+  }
+
+  // Hàm lên lịch thông báo cho tất cả members của 2 team
+  Future<void> _scheduleNotificationsForBothTeams({
+    required String eventId,
+    required String eventName,
+    required DateTime eventTime,
+    String? requesterTeamId,
+    String? ownerTeamId,
+  }) async {
+    final alarmService = AlarmNotificationService();
+    final teamsToNotify = <String>[];
+
+    if (requesterTeamId != null) teamsToNotify.add(requesterTeamId);
+    if (ownerTeamId != null) teamsToNotify.add(ownerTeamId);
+
+    print(
+      '🔔 [Team] Gửi thông báo cho ${teamsToNotify.length} team(s): $eventName',
+    );
+
+    for (String teamId in teamsToNotify) {
+      try {
+        // Lấy danh sách members của team
+        final teamDoc = await _firestore.collection('teams').doc(teamId).get();
+        if (teamDoc.exists) {
+          final teamData = teamDoc.data();
+          final members = teamData?['members'] as List<dynamic>?;
+
+          if (members != null && members.isNotEmpty) {
+            // Gửi thông báo cho từng member
+            for (var member in members) {
+              final memberId = member['uid'] as String?;
+              if (memberId != null) {
+                await alarmService.scheduleEventReminders(
+                  eventId: '${eventId}_${memberId}',
+                  eventName: eventName,
+                  eventTime: eventTime,
+                );
+              }
+            }
+            print(
+              '✅ Đã lên lịch alarm cho ${members.length} members của team $teamId',
+            );
+          }
+        }
+      } catch (e) {
+        print('❌ Lỗi khi lên lịch cho team $teamId: $e');
+      }
+    }
   }
 
   Future<void> _refreshData() async {
@@ -445,20 +537,59 @@ class _ScheduleItemCard extends StatelessWidget {
   Future<void> _updateRequestStatus(String status) async {
     await joinRequestDoc.reference.update({'status': status});
 
-    // Lên lịch thông báo khi accept
+    // Lên lịch thông báo khi accept - gửi cho TẤT CẢ members của 2 team
     if (status == 'accepted') {
       final data = joinRequestDoc.data() as Map<String, dynamic>;
       final eventId = data['eventId'] as String?;
       final eventName = data['eventName'] as String? ?? 'Sự kiện';
       final eventTime = data['eventTime'] as Timestamp?;
+      final requesterId = data['requesterId'] as String?;
+      final eventOwnerId = data['eventOwnerId'] as String?;
 
       if (eventId != null && eventTime != null) {
-        final notificationService = NotificationService();
-        await notificationService.scheduleEventReminders(
-          eventId: eventId,
-          eventName: eventName,
-          eventTime: eventTime.toDate(),
+        final alarmService = AlarmNotificationService();
+        final firestore = FirebaseFirestore.instance;
+        final teamsToNotify = <String>[];
+
+        if (requesterId != null) teamsToNotify.add(requesterId);
+        if (eventOwnerId != null) teamsToNotify.add(eventOwnerId);
+
+        print(
+          '🔔 [Accept] Gửi thông báo cho ${teamsToNotify.length} team(s): $eventName',
         );
+
+        for (String teamId in teamsToNotify) {
+          try {
+            // Lấy danh sách members của team
+            final teamDoc = await firestore
+                .collection('teams')
+                .doc(teamId)
+                .get();
+            if (teamDoc.exists) {
+              final teamData = teamDoc.data();
+              final members = teamData?['members'] as List<dynamic>?;
+
+              if (members != null && members.isNotEmpty) {
+                // Gửi thông báo cho từng member
+                for (var member in members) {
+                  final memberId = member['uid'] as String?;
+                  if (memberId != null) {
+                    await alarmService.scheduleEventReminders(
+                      eventId: '${eventId}_${memberId}',
+                      eventName: eventName,
+                      eventTime: eventTime.toDate(),
+                    );
+                  }
+                }
+                print(
+                  '✅ Đã lên lịch alarm cho ${members.length} members của team $teamId',
+                );
+              }
+            }
+          } catch (e) {
+            print('❌ Lỗi khi lên lịch cho team $teamId: $e');
+          }
+        }
       }
     }
   }

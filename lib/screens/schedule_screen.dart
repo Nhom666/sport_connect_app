@@ -8,6 +8,7 @@ import '../utils/constants.dart';
 import 'details_match_screen.dart';
 import 'review_team_screen.dart';
 import '../service/notification_service.dart';
+import '../service/alarm_notification_service.dart';
 
 class ScheduleScreen extends StatefulWidget {
   const ScheduleScreen({super.key});
@@ -53,6 +54,59 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final notificationService = NotificationService();
     await notificationService.init();
     await notificationService.requestPermissions();
+
+    // Khởi tạo AlarmManager service
+    final alarmService = AlarmNotificationService();
+    await alarmService.init();
+
+    // Lắng nghe các request của user này được accept
+    if (_auth.currentUser != null) {
+      _listenForAcceptedRequests();
+    }
+  }
+
+  void _listenForAcceptedRequests() {
+    final userId = _auth.currentUser!.uid;
+
+    // Lắng nghe joinRequests mà user này là requester và được accept
+    _firestore
+        .collection('joinRequests')
+        .where('requesterId', isEqualTo: userId)
+        .where('status', isEqualTo: 'accepted')
+        .snapshots()
+        .listen((snapshot) {
+          for (var change in snapshot.docChanges) {
+            if (change.type == DocumentChangeType.modified ||
+                change.type == DocumentChangeType.added) {
+              final data = change.doc.data();
+              if (data != null) {
+                final eventId = data['eventId'] as String?;
+                final eventName = data['eventName'] as String? ?? 'Sự kiện';
+                final eventTime = data['eventTime'] as Timestamp?;
+
+                if (eventId != null && eventTime != null) {
+                  final alarmService = AlarmNotificationService();
+
+                  // Lên lịch thông báo cho requester (người được accept)
+                  alarmService.scheduleEventReminders(
+                    eventId: '${eventId}_requester',
+                    eventName: eventName,
+                    eventTime: eventTime.toDate(),
+                  );
+                  print('📱 Đã lên lịch alarm cho requester: $eventName');
+
+                  // Lên lịch thông báo cho event owner (người accept/tổ chức)
+                  alarmService.scheduleEventReminders(
+                    eventId: '${eventId}_owner',
+                    eventName: eventName,
+                    eventTime: eventTime.toDate(),
+                  );
+                  print('📱 Đã lên lịch alarm cho event owner: $eventName');
+                }
+              }
+            }
+          }
+        });
   }
 
   Future<void> _refreshData() async {
@@ -606,7 +660,7 @@ class _ScheduleItemCard extends StatelessWidget {
   Future<void> _updateRequestStatus(String status) async {
     await joinRequestDoc.reference.update({'status': status});
 
-    // Lên lịch thông báo khi accept
+    // Lên lịch thông báo khi accept - DÙNG ALARMMANAGER
     if (status == 'accepted') {
       final data = joinRequestDoc.data() as Map<String, dynamic>;
       final eventId = data['eventId'] as String?;
@@ -614,12 +668,23 @@ class _ScheduleItemCard extends StatelessWidget {
       final eventTime = data['eventTime'] as Timestamp?;
 
       if (eventId != null && eventTime != null) {
-        final notificationService = NotificationService();
-        await notificationService.scheduleEventReminders(
-          eventId: eventId,
+        final alarmService = AlarmNotificationService();
+
+        // Gửi thông báo cho requester (người xin vào kèo)
+        await alarmService.scheduleEventReminders(
+          eventId: '${eventId}_requester',
           eventName: eventName,
           eventTime: eventTime.toDate(),
         );
+        print('📱 Đã lên lịch alarm cho requester: $eventName');
+
+        // Gửi thông báo cho event owner (người accept/tổ chức)
+        await alarmService.scheduleEventReminders(
+          eventId: '${eventId}_owner',
+          eventName: eventName,
+          eventTime: eventTime.toDate(),
+        );
+        print('📱 Đã lên lịch alarm cho event owner: $eventName');
       }
     }
   }

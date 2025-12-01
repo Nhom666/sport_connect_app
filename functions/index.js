@@ -68,81 +68,81 @@ exports.autoRejectOldRequests = onSchedule(
   }
 );
 
-// === (THÊM MỚI) PHẦN 4: HÀM TỰ ĐỘNG HỦY KHI ACCEPT ===
+// === PHẦN 4: HÀM XỬ LÝ KHI REQUEST ĐƯỢC CHẤP NHẬN (CẬP NHẬT MỚI) ===
 exports.onJoinRequestAccepted = onDocumentUpdated(
   {
     document: "joinRequests/{docId}",
-    region: "asia-southeast1", // Đặt cùng region với các function khác
+    region: "asia-southeast1",
   },
   async (event) => {
-    // Lấy dữ liệu trước và sau khi thay đổi
+    // Lấy dữ liệu
     const beforeData = event.data.before.data();
     const afterData = event.data.after.data();
 
-    // --- 1. KIỂM TRA ĐIỀU KIỆN ---
-    // Chỉ chạy khi status thay đổi từ 'pending' -> 'accepted'
+    // 1. Chỉ chạy khi status chuyển từ 'pending' -> 'accepted'
     if (beforeData.status !== "pending" || afterData.status !== "accepted") {
-      console.log("Không phải thay đổi từ pending->accepted, bỏ qua.");
       return null;
     }
 
-    console.log(
-      `Đang xử lý auto-cancel cho requester: ${afterData.requesterId}`
-    );
+    console.log(`Đang xử lý logic ACCEPT cho request: ${event.params.docId}`);
 
-    // --- 2. LẤY THÔNG TIN CẦN THIẾT ---
     const requesterId = afterData.requesterId;
     const acceptedEventTime = afterData.eventTime;
-    const acceptedDocId = event.params.docId; // ID của doc vừa được accept
     const eventId = afterData.eventId;
+    const acceptedDocId = event.params.docId;
 
-    if (!eventId) {
-      console.log("Thiếu eventId, không thể cập nhật isFull.");
+    if (!eventId || !requesterId || !acceptedEventTime) {
+      console.log("Thiếu dữ liệu quan trọng (eventId/requesterId), bỏ qua.");
       return null;
     }
 
-    if (!requesterId || !acceptedEventTime) {
-      console.log("Thiếu requesterId hoặc eventTime, không thể xử lý.");
-      return null;
-    }
-
-    // --- 3. KHỞI TẠO BATCH VÀ ĐÁNH DẤU SỰ KIỆN FULL NGAY ---
     try {
       const batch = db.batch();
 
-      // LUÔN LUÔN đánh dấu sự kiện là full khi accept request
+      // --- BƯỚC A: ĐÁNH DẤU SỰ KIỆN LÀ FULL ---
       const eventRef = db.collection("events").doc(eventId);
       batch.update(eventRef, { isFull: true });
-      console.log(`Đã đánh dấu event ${eventId} là isFull: true`);
 
-      // --- 4. TÌM CÁC YÊU CẦU KHÁC BỊ TRÙNG (của cùng 1 người) ---
-      const otherPendingRequests = await db
+      // --- BƯỚC B: TỪ CHỐI NGƯỜI KHÁC ĐANG XIN VÀO CÙNG SỰ KIỆN NÀY (LOGIC MỚI) ---
+      // Tìm các request khác cho eventId này mà vẫn đang pending
+      const pendingRequestsForThisEvent = await db
         .collection("joinRequests")
-        .where("requesterId", "==", requesterId)
-        .where("status", "==", "pending") // Chỉ tìm cái 'pending'
-        .where("eventTime", "==", acceptedEventTime) // Trùng thời gian
+        .where("eventId", "==", eventId)
+        .where("status", "==", "pending")
         .get();
 
-      // --- 5. HỦY CÁC YÊU CẦU TRÙNG (nếu có) ---
-      let count = 0;
-      otherPendingRequests.docs.forEach((doc) => {
-        // Đảm bảo không tự hủy chính mình (dù query đã lọc status)
+      pendingRequestsForThisEvent.docs.forEach((doc) => {
+        // (Không cần check doc.id !== acceptedDocId vì cái accepted kia status đã là 'accepted' rồi, không lọt vào query này được)
+        console.log(`Từ chối người khác (Event Full): ${doc.id}`);
+        // Chuyển sang 'regretted' (Từ chối)
+        batch.update(doc.ref, { status: "regretted" });
+      });
+
+      // --- BƯỚC C: HỦY CÁC YÊU CẦU TRÙNG GIỜ CỦA CHÍNH NGƯỜI ĐƯỢC ACCEPT ---
+      // Tìm các request của user này ở event khác nhưng cùng khung giờ
+      const sameUserOtherRequests = await db
+        .collection("joinRequests")
+        .where("requesterId", "==", requesterId)
+        .where("status", "==", "pending")
+        .where("eventTime", "==", acceptedEventTime)
+        .get();
+
+      sameUserOtherRequests.docs.forEach((doc) => {
         if (doc.id !== acceptedDocId) {
-          console.log(`Tự động hủy yêu cầu: ${doc.id}`);
+          console.log(`Hủy request trùng giờ của user: ${doc.id}`);
+          // Chuyển sang 'cancelled' (Hủy bỏ do user đã bận event này)
           batch.update(doc.ref, { status: "cancelled" });
-          count++;
         }
       });
 
-      // --- 6. THỰC THI BATCH ---
+      // --- THỰC THI TẤT CẢ ---
       await batch.commit();
       console.log(
-        `Đã đánh dấu event full và tự động hủy ${count} yêu cầu trùng.`
+        "Đã xử lý xong: Mark Full + Reject Others + Cancel Conflicts"
       );
       return null;
     } catch (error) {
-      console.error("Lỗi khi xử lý accept request:", error);
-      // Bạn CẦN tạo Index cho query ở trên (requesterId, status, eventTime)
+      console.error("Lỗi trong onJoinRequestAccepted:", error);
       return null;
     }
   }
