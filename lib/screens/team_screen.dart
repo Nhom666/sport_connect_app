@@ -547,17 +547,14 @@ class _TeamScreenState extends State<TeamScreen>
       backgroundColor: kWhiteColor,
       appBar: AppBar(
         title: const Text(
-          'Your Team',
+          'Communication',
           style: TextStyle(
             color: kPrimaryColor,
             fontWeight: FontWeight.bold,
             fontSize: 24,
           ),
         ),
-        actions: [
-          IconButton(icon: const Icon(Icons.search), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.more_horiz), onPressed: () {}),
-        ],
+
         bottom: TabBar(
           controller: _tabController, // Gán controller
           labelColor: kAccentColor,
@@ -612,21 +609,33 @@ class _TeamScreenState extends State<TeamScreen>
           );
         }
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Center(
-            child: Text(
-              'You are not a member of any team. Create or join one!',
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.groups_outlined, size: 80, color: Colors.grey[300]),
+                const SizedBox(height: 16),
+                const Text(
+                  'You are not a member of any team',
+                  style: TextStyle(fontSize: 16, color: Colors.grey),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Create or join one!',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+              ],
             ),
           );
         }
 
         final teams = snapshot.data!.docs;
 
-        if (_expandedTeamId == null && teams.isNotEmpty) {
-          _expandedTeamId = teams.first.id;
-        }
-
         return ListView.builder(
-          padding: const EdgeInsets.all(kSmallPadding),
+          padding: const EdgeInsets.symmetric(
+            horizontal: kDefaultPadding,
+            vertical: kSmallPadding,
+          ),
           itemCount: teams.length,
           itemBuilder: (context, index) {
             final teamDoc = teams[index];
@@ -634,30 +643,29 @@ class _TeamScreenState extends State<TeamScreen>
             final teamId = teamDoc.id;
             final teamName = teamData['teamName'] ?? 'No Name';
             final isOwner = currentUser.uid == teamData['ownerId'];
+            final isExpanded = _expandedTeamId == teamId;
 
-            return GestureDetector(
-              onTap: () {
-                setState(() {
-                  if (_expandedTeamId == teamId) {
-                    _expandedTeamId = null;
-                  } else {
-                    _expandedTeamId = teamId;
-                  }
-                });
-              },
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: kDefaultPadding),
-                child: TeamCard(
-                  teamId: teamId,
-                  teamName: teamName,
-                  sport: teamData['sport'] ?? 'No Sport',
-                  imageUrl: teamData['imageUrl'] ?? '',
-                  showDetails: _expandedTeamId == teamId,
-                  isOwner: isOwner,
-                  onShowId: () => _showTeamIdDialog(teamId),
-                  onDelete: () => _deleteTeam(teamId, teamName),
-                  onUpdateImage: () => _updateTeamImage(teamId),
-                ),
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12.0),
+              child: TeamCard(
+                teamId: teamId,
+                teamName: teamName,
+                sport: teamData['sport'] ?? 'No Sport',
+                imageUrl: teamData['imageUrl'] ?? '',
+                showDetails: isExpanded,
+                isOwner: isOwner,
+                onTap: () {
+                  setState(() {
+                    if (_expandedTeamId == teamId) {
+                      _expandedTeamId = null;
+                    } else {
+                      _expandedTeamId = teamId;
+                    }
+                  });
+                },
+                onShowId: () => _showTeamIdDialog(teamId),
+                onDelete: () => _deleteTeam(teamId, teamName),
+                onUpdateImage: () => _updateTeamImage(teamId),
               ),
             );
           },
@@ -674,6 +682,7 @@ class TeamCard extends StatelessWidget {
   final String imageUrl;
   final bool showDetails;
   final bool isOwner;
+  final VoidCallback onTap;
   final VoidCallback onShowId;
   final VoidCallback onDelete;
   final VoidCallback onUpdateImage;
@@ -686,6 +695,7 @@ class TeamCard extends StatelessWidget {
     required this.imageUrl,
     this.showDetails = false,
     required this.isOwner,
+    required this.onTap,
     required this.onShowId,
     required this.onDelete,
     required this.onUpdateImage,
@@ -765,217 +775,356 @@ class TeamCard extends StatelessWidget {
     ];
 
     return Card(
-      elevation: 2.0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      elevation: showDetails ? 4.0 : 1.0,
+      shadowColor: showDetails
+          ? kAccentColor.withOpacity(0.3)
+          : Colors.grey.withOpacity(0.2),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16.0),
+        side: BorderSide(
+          color: showDetails
+              ? kAccentColor.withOpacity(0.3)
+              : Colors.transparent,
+          width: 1.5,
+        ),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16.0),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!showDetails)
+                _buildCompactView()
+              else
+                _buildExpandedView(context, detailItems),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactView() {
+    return Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12.0),
+            child: CachedNetworkImage(
+              imageUrl: imageUrl,
+              height: 70,
+              width: 70,
+              fit: BoxFit.cover,
+              placeholder: (context, url) => Container(
+                color: Colors.grey[200],
+                child: const Icon(Icons.image, color: Colors.grey),
+              ),
+              errorWidget: (context, url, error) => Container(
+                color: Colors.grey[200],
+                child: const Icon(Icons.error, color: Colors.grey),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        teamName,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(sport, style: const TextStyle(color: Colors.grey)),
-                    ],
+                Text(
+                  teamName,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: kPrimaryColor,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_horiz),
-                  onSelected: (value) {
-                    if (value == 'show_id')
-                      onShowId();
-                    else if (value == 'delete')
-                      onDelete();
-                  },
-                  itemBuilder: (BuildContext context) =>
-                      <PopupMenuEntry<String>>[
-                        const PopupMenuItem<String>(
-                          value: 'show_id',
-                          child: ListTile(
-                            leading: Icon(Icons.vpn_key_outlined),
-                            title: Text('Show Team ID'),
-                          ),
-                        ),
-                        if (isOwner)
-                          const PopupMenuItem<String>(
-                            value: 'delete',
-                            child: ListTile(
-                              leading: Icon(
-                                Icons.delete_outline,
-                                color: Colors.red,
-                              ),
-                              title: Text(
-                                'Delete Team',
-                                style: TextStyle(color: Colors.red),
-                              ),
-                            ),
-                          ),
-                      ],
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(Icons.sports, size: 14, color: Colors.grey[600]),
+                    const SizedBox(width: 4),
+                    Text(
+                      sport,
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 8.0),
-            Stack(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8.0),
-                  child: CachedNetworkImage(
-                    imageUrl: imageUrl,
-                    height: 150,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    placeholder: (context, url) =>
-                        Container(color: Colors.grey[200]),
-                    errorWidget: (context, url, error) =>
-                        const Icon(Icons.error),
-                  ),
-                ),
+                const SizedBox(height: 4),
                 if (isOwner)
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: InkWell(
-                      onTap: onUpdateImage,
-                      borderRadius: BorderRadius.circular(50),
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.5),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.edit,
-                          color: Colors.white,
-                          size: 20,
-                        ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: kAccentColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Owner',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: kAccentColor,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
               ],
             ),
-            if (showDetails) ...[
-              const SizedBox(height: 16.0),
-              const Text(
-                'View details',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 16.0),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: detailItems.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 8.0,
-                  mainAxisSpacing: 16.0,
-                  childAspectRatio: 1.1,
-                ),
-                itemBuilder: (context, index) {
-                  final item = detailItems[index];
+          ),
+          Icon(Icons.keyboard_arrow_down, color: Colors.grey[400]),
+        ],
+      ),
+    );
+  }
 
-                  return GestureDetector(
-                    onTap: () {
-                      if (item['label'] == 'Members') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                MemberListScreen(teamId: teamId),
+  Widget _buildExpandedView(
+    BuildContext context,
+    List<Map<String, dynamic>> detailItems,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      teamName,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: kPrimaryColor,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(Icons.sports, size: 16, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(
+                          sport,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
                           ),
-                        );
-                      } else if (item['label'] == 'Chat') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                ChatScreen(teamId: teamId, teamName: teamName),
-                          ),
-                        );
-                      } else if (item['label'] == 'Create Event') {
-                        if (isOwner) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => CreateEventScreen(
-                                preSelectedTeamId: teamId,
-                                preSelectedTeamName: teamName,
-                              ),
-                            ),
-                          );
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Chỉ đội trưởng mới có thể tạo sự kiện cho đội.',
-                              ),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
-                      } else if (item['label'] == 'Events') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => EventOfTeamScreen(
-                              teamId: teamId,
-                              teamName: teamName,
-                            ),
-                          ),
-                        );
-                      } else if (item['label'] == 'Schedule') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ScheduleTeamScreen(
-                              teamId: teamId,
-                              teamName: teamName,
-                              isUserOwner: isOwner,
-                            ),
-                          ),
-                        );
-                      } else if (item['label'] == 'Reviews') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                ReviewTeamScreen(teamId: teamId),
-                          ),
-                        );
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              '${item['label']} feature is coming soon!',
-                            ),
-                          ),
-                        );
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                children: [
+                  Icon(Icons.keyboard_arrow_up, color: Colors.grey[400]),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert),
+                    onSelected: (value) {
+                      if (value == 'show_id') {
+                        onShowId();
+                      } else if (value == 'delete') {
+                        onDelete();
                       }
                     },
-                    child: item['label'] == 'Chat'
-                        ? _buildChatIconWithBadge(context)
-                        : _DetailIcon(
-                            icon: item['icon'],
-                            label: item['label'],
-                            hasBadge: item['hasBadge'] ?? false,
+                    itemBuilder: (BuildContext context) =>
+                        <PopupMenuEntry<String>>[
+                          const PopupMenuItem<String>(
+                            value: 'show_id',
+                            child: Row(
+                              children: [
+                                Icon(Icons.vpn_key_outlined, size: 20),
+                                SizedBox(width: 12),
+                                Text('Show Team ID'),
+                              ],
+                            ),
                           ),
-                  );
-                },
+                          if (isOwner)
+                            const PopupMenuItem<String>(
+                              value: 'delete',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.red,
+                                    size: 20,
+                                  ),
+                                  SizedBox(width: 12),
+                                  Text(
+                                    'Delete Team',
+                                    style: TextStyle(color: Colors.red),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                  ),
+                ],
               ),
             ],
-          ],
-        ),
+          ),
+          const SizedBox(height: 12.0),
+          Stack(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12.0),
+                child: CachedNetworkImage(
+                  imageUrl: imageUrl,
+                  height: 160,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  placeholder: (context, url) =>
+                      Container(color: Colors.grey[200]),
+                  errorWidget: (context, url, error) => const Icon(Icons.error),
+                ),
+              ),
+              if (isOwner)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: InkWell(
+                    onTap: onUpdateImage,
+                    borderRadius: BorderRadius.circular(50),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.6),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.edit,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16.0),
+          const Divider(height: 1),
+          const SizedBox(height: 12.0),
+          const Text(
+            'Quick Actions',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: kPrimaryColor,
+            ),
+          ),
+          const SizedBox(height: 12.0),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: detailItems.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 10.0,
+              mainAxisSpacing: 12.0,
+              childAspectRatio: 1.0,
+            ),
+            itemBuilder: (context, index) {
+              final item = detailItems[index];
+
+              return GestureDetector(
+                onTap: () {
+                  if (item['label'] == 'Members') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => MemberListScreen(teamId: teamId),
+                      ),
+                    );
+                  } else if (item['label'] == 'Chat') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            ChatScreen(teamId: teamId, teamName: teamName),
+                      ),
+                    );
+                  } else if (item['label'] == 'Create Event') {
+                    if (isOwner) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => CreateEventScreen(
+                            preSelectedTeamId: teamId,
+                            preSelectedTeamName: teamName,
+                          ),
+                        ),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Chỉ đội trưởng mới có thể tạo sự kiện cho đội.',
+                          ),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  } else if (item['label'] == 'Events') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => EventOfTeamScreen(
+                          teamId: teamId,
+                          teamName: teamName,
+                        ),
+                      ),
+                    );
+                  } else if (item['label'] == 'Schedule') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ScheduleTeamScreen(
+                          teamId: teamId,
+                          teamName: teamName,
+                          isUserOwner: isOwner,
+                        ),
+                      ),
+                    );
+                  } else if (item['label'] == 'Reviews') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ReviewTeamScreen(teamId: teamId),
+                      ),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          '${item['label']} feature is coming soon!',
+                        ),
+                      ),
+                    );
+                  }
+                },
+                child: item['label'] == 'Chat'
+                    ? _buildChatIconWithBadge(context)
+                    : _DetailIcon(
+                        icon: item['icon'],
+                        label: item['label'],
+                        hasBadge: item['hasBadge'] ?? false,
+                      ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }

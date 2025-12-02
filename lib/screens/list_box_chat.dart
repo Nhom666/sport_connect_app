@@ -153,8 +153,12 @@ class _ListBoxChatScreenState extends State<ListBoxChatScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          'Tin nhắn',
-          style: TextStyle(color: kPrimaryColor, fontWeight: FontWeight.bold),
+          'Chats',
+          style: TextStyle(
+            color: kPrimaryColor,
+            fontWeight: FontWeight.bold,
+            fontSize: 24,
+          ),
         ),
         backgroundColor: kWhiteColor,
         elevation: 1,

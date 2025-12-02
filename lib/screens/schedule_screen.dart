@@ -39,6 +39,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
 
+  // --- Biến cho tìm kiếm ---
+  String _searchQuery = '';
+  final TextEditingController _searchNameController = TextEditingController();
+  final TextEditingController _searchLocationController =
+      TextEditingController();
+  final TextEditingController _searchDateController = TextEditingController();
+  final TextEditingController _searchTimeController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +56,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     }
     // Khởi tạo notification service
     _initNotifications();
+  }
+
+  @override
+  void dispose() {
+    _searchNameController.dispose();
+    _searchLocationController.dispose();
+    _searchDateController.dispose();
+    _searchTimeController.dispose();
+    super.dispose();
   }
 
   Future<void> _initNotifications() async {
@@ -133,6 +150,254 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     return controlledIds;
   }
 
+  bool _matchesSearchQuery(Map<String, dynamic> data) {
+    // Nếu tất cả các trường tìm kiếm đều trống, trả về true
+    if (_searchNameController.text.isEmpty &&
+        _searchLocationController.text.isEmpty &&
+        _searchDateController.text.isEmpty &&
+        _searchTimeController.text.isEmpty) {
+      return true;
+    }
+
+    final eventName = (data['eventName'] as String? ?? '').toLowerCase();
+    final location = (data['eventLocationName'] as String? ?? '').toLowerCase();
+    final eventTime = data['eventTime'] as Timestamp?;
+
+    // Tìm theo tên sự kiện
+    if (_searchNameController.text.isNotEmpty) {
+      final nameQuery = _searchNameController.text.toLowerCase();
+      if (!eventName.contains(nameQuery)) return false;
+    }
+
+    // Tìm theo địa điểm
+    if (_searchLocationController.text.isNotEmpty) {
+      final locationQuery = _searchLocationController.text.toLowerCase();
+      if (!location.contains(locationQuery)) return false;
+    }
+
+    // Tìm theo ngày
+    if (_searchDateController.text.isNotEmpty && eventTime != null) {
+      final dateQuery = _searchDateController.text.toLowerCase();
+      final date = eventTime.toDate();
+
+      bool dateMatches = false;
+
+      // Format: dd/MM/yyyy
+      final dateStr1 = DateFormat('dd/MM/yyyy').format(date).toLowerCase();
+      if (dateStr1.contains(dateQuery)) dateMatches = true;
+
+      // Format: dd-MM-yyyy
+      final dateStr2 = DateFormat('dd-MM-yyyy').format(date).toLowerCase();
+      if (dateStr2.contains(dateQuery)) dateMatches = true;
+
+      // Format: yyyy-MM-dd
+      final dateStr3 = DateFormat('yyyy-MM-dd').format(date).toLowerCase();
+      if (dateStr3.contains(dateQuery)) dateMatches = true;
+
+      // Format: EEEE, dd/MM/yyyy
+      final dateStr4 = DateFormat(
+        'EEEE, dd/MM/yyyy',
+      ).format(date).toLowerCase();
+      if (dateStr4.contains(dateQuery)) dateMatches = true;
+
+      // Tên tháng
+      final monthStr = DateFormat('MMMM').format(date).toLowerCase();
+      if (monthStr.contains(dateQuery)) dateMatches = true;
+
+      // Năm
+      final yearStr = date.year.toString();
+      if (yearStr.contains(dateQuery)) dateMatches = true;
+
+      if (!dateMatches) return false;
+    }
+
+    // Tìm theo giờ
+    if (_searchTimeController.text.isNotEmpty && eventTime != null) {
+      final timeQuery = _searchTimeController.text.toLowerCase();
+      final date = eventTime.toDate();
+
+      bool timeMatches = false;
+
+      // Format: HH:mm
+      final timeStr1 = DateFormat('HH:mm').format(date).toLowerCase();
+      if (timeStr1.contains(timeQuery)) timeMatches = true;
+
+      // Format: h:mm a
+      final timeStr2 = DateFormat('h:mm a').format(date).toLowerCase();
+      if (timeStr2.contains(timeQuery)) timeMatches = true;
+
+      if (!timeMatches) return false;
+    }
+
+    return true;
+  }
+
+  void _showSearchDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            'Search Events',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Event Name Field
+                TextField(
+                  controller: _searchNameController,
+                  decoration: InputDecoration(
+                    labelText: 'Event name',
+                    hintText: 'Enter event name...',
+                    prefixIcon: const Icon(Icons.event, color: Colors.blue),
+                    suffixIcon: _searchNameController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchNameController.clear();
+                              setDialogState(() {});
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: Colors.blue[50],
+                  ),
+                  onChanged: (value) => setDialogState(() {}),
+                ),
+                const SizedBox(height: 12),
+
+                // Location Field
+                TextField(
+                  controller: _searchLocationController,
+                  decoration: InputDecoration(
+                    labelText: 'Location',
+                    hintText: 'Enter location...',
+                    prefixIcon: const Icon(
+                      Icons.location_on,
+                      color: Colors.green,
+                    ),
+                    suffixIcon: _searchLocationController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchLocationController.clear();
+                              setDialogState(() {});
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: Colors.green[50],
+                  ),
+                  onChanged: (value) => setDialogState(() {}),
+                ),
+                const SizedBox(height: 12),
+
+                // Date Field
+                TextField(
+                  controller: _searchDateController,
+                  decoration: InputDecoration(
+                    labelText: 'Date',
+                    hintText: 'dd/MM/yyyy or Monday...',
+                    prefixIcon: const Icon(
+                      Icons.calendar_today,
+                      color: Colors.orange,
+                    ),
+                    suffixIcon: _searchDateController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchDateController.clear();
+                              setDialogState(() {});
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: Colors.orange[50],
+                  ),
+                  onChanged: (value) => setDialogState(() {}),
+                ),
+                const SizedBox(height: 12),
+
+                // Time Field
+                TextField(
+                  controller: _searchTimeController,
+                  decoration: InputDecoration(
+                    labelText: 'Time',
+                    hintText: '14:30 or 2:30 PM...',
+                    prefixIcon: const Icon(
+                      Icons.access_time,
+                      color: Colors.purple,
+                    ),
+                    suffixIcon: _searchTimeController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchTimeController.clear();
+                              setDialogState(() {});
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: Colors.purple[50],
+                  ),
+                  onChanged: (value) => setDialogState(() {}),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                _searchNameController.clear();
+                _searchLocationController.clear();
+                _searchDateController.clear();
+                _searchTimeController.clear();
+                setState(() {
+                  _searchQuery = '';
+                });
+                Navigator.of(context).pop();
+              },
+              child: const Text('Clear'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  // Update search query để trigger rebuild
+                  _searchQuery =
+                      '${_searchNameController.text}|${_searchLocationController.text}|${_searchDateController.text}|${_searchTimeController.text}';
+                });
+                Navigator.of(context).pop();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kAccentColor,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Search'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   String _getSportVisual(String? sportName) {
     switch (sportName) {
       case 'Bóng đá':
@@ -174,12 +439,27 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             style: TextStyle(
               color: Color.fromRGBO(7, 7, 112, 1),
               fontWeight: FontWeight.bold,
-              fontSize: 32,
+              fontSize: 24,
             ),
           ),
           actions: [
-            IconButton(icon: const Icon(Icons.search), onPressed: () {}),
-            IconButton(icon: const Icon(Icons.more_horiz), onPressed: () {}),
+            IconButton(
+              icon: const Icon(Icons.search),
+              onPressed: _showSearchDialog,
+            ),
+            if (_searchQuery.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.clear),
+                onPressed: () {
+                  setState(() {
+                    _searchQuery = '';
+                    _searchNameController.clear();
+                    _searchLocationController.clear();
+                    _searchDateController.clear();
+                    _searchTimeController.clear();
+                  });
+                },
+              ),
           ],
           bottom: const TabBar(
             labelColor: Colors.black,
@@ -259,13 +539,22 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   for (var doc in allRequests) doc.id: doc,
                 }.values.toList();
 
-                final filteredRequests = (_selectedSport == 'All')
+                // Lọc theo sport
+                var filteredRequests = (_selectedSport == 'All')
                     ? uniqueRequests
                     : uniqueRequests.where((doc) {
                         return (doc.data()
                                 as Map<String, dynamic>)['eventSport'] ==
                             _selectedSport;
                       }).toList();
+
+                // Lọc theo search query
+                if (_searchQuery.isNotEmpty) {
+                  filteredRequests = filteredRequests.where((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    return _matchesSearchQuery(data);
+                  }).toList();
+                }
 
                 filteredRequests.sort((a, b) {
                   Timestamp? aTime =
@@ -505,8 +794,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   }
                 }
 
-                final selectedDayEvents =
+                var selectedDayEvents =
                     eventsByDay[_normalizeDate(_selectedDay!)] ?? [];
+
+                // Áp dụng search filter
+                if (_searchQuery.isNotEmpty) {
+                  selectedDayEvents = selectedDayEvents.where((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    return _matchesSearchQuery(data);
+                  }).toList();
+                }
 
                 return Column(
                   children: [
