@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'user_profile_screen.dart';
 import '../utils/constants.dart';
@@ -33,12 +32,45 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
 
+  // --- Biến cho lazy loading ---
+  final ScrollController _scrollController = ScrollController();
+  int _itemsPerPage = 20;
+  bool _isLoadingMore = false;
+  bool _hasMoreData = true;
+  int _currentLimit = 20;
+
   @override
   void initState() {
     super.initState();
     _selectedDay = _focusedDay;
     // Khởi tạo notification service
     _initNotifications();
+    // Khởi tạo scroll listener cho lazy loading
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      if (!_isLoadingMore && _hasMoreData) {
+        _loadMoreData();
+      }
+    }
+  }
+
+  void _loadMoreData() {
+    if (!_isLoadingMore && _hasMoreData) {
+      setState(() {
+        _isLoadingMore = true;
+        _currentLimit += _itemsPerPage;
+      });
+    }
   }
 
   Future<void> _initNotifications() async {
@@ -147,7 +179,12 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
   }
 
   Future<void> _refreshData() async {
-    setState(() {});
+    setState(() {
+      // Reset pagination on refresh
+      _currentLimit = 20;
+      _hasMoreData = true;
+      _isLoadingMore = false;
+    });
     return;
   }
 
@@ -227,11 +264,15 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
     final incomingStream = _firestore
         .collection('joinRequests')
         .where('eventOwnerId', isEqualTo: widget.teamId)
+        .orderBy('eventTime', descending: false)
+        .limit(_currentLimit)
         .snapshots();
 
     final outgoingStream = _firestore
         .collection('joinRequests')
         .where('requesterId', isEqualTo: widget.teamId)
+        .orderBy('eventTime', descending: false)
+        .limit(_currentLimit)
         .snapshots();
 
     return StreamBuilder<QuerySnapshot>(
@@ -240,6 +281,24 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
         return StreamBuilder<QuerySnapshot>(
           stream: outgoingStream,
           builder: (context, outgoingSnapshot) {
+            // Update loading state based on data availability
+            if (_isLoadingMore &&
+                incomingSnapshot.hasData &&
+                outgoingSnapshot.hasData) {
+              final totalDocs =
+                  (incomingSnapshot.data?.docs.length ?? 0) +
+                  (outgoingSnapshot.data?.docs.length ?? 0);
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  setState(() {
+                    _isLoadingMore = false;
+                    if (totalDocs < _currentLimit) {
+                      _hasMoreData = false;
+                    }
+                  });
+                }
+              });
+            }
             if (!incomingSnapshot.hasData || !outgoingSnapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -296,10 +355,21 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
   Widget _buildGroupedListView(List<DocumentSnapshot> requests) {
     String? lastDateHeader;
     return ListView.builder(
+      controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(kDefaultPadding),
-      itemCount: requests.length,
+      itemCount: requests.length + (_hasMoreData ? 1 : 0),
       itemBuilder: (context, index) {
+        // Show loading indicator at the end
+        if (index == requests.length) {
+          if (_isLoadingMore) {
+            return const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return const SizedBox.shrink();
+        }
         final doc = requests[index];
         final data = doc.data() as Map<String, dynamic>;
         Widget headerWidget = const SizedBox.shrink();

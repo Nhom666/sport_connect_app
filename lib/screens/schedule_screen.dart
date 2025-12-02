@@ -47,6 +47,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   final TextEditingController _searchDateController = TextEditingController();
   final TextEditingController _searchTimeController = TextEditingController();
 
+  // --- Biến cho lazy loading ---
+  final ScrollController _scrollController = ScrollController();
+  int _itemsPerPage = 20;
+  bool _isLoadingMore = false;
+  bool _hasMoreData = true;
+  int _currentLimit = 20;
+
   @override
   void initState() {
     super.initState();
@@ -56,6 +63,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     }
     // Khởi tạo notification service
     _initNotifications();
+    // Khởi tạo scroll listener cho lazy loading
+    _scrollController.addListener(_onScroll);
   }
 
   @override
@@ -64,7 +73,26 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     _searchLocationController.dispose();
     _searchDateController.dispose();
     _searchTimeController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      if (!_isLoadingMore && _hasMoreData) {
+        _loadMoreData();
+      }
+    }
+  }
+
+  void _loadMoreData() {
+    if (!_isLoadingMore && _hasMoreData) {
+      setState(() {
+        _isLoadingMore = true;
+        _currentLimit += _itemsPerPage;
+      });
+    }
   }
 
   Future<void> _initNotifications() async {
@@ -131,6 +159,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       final newIdsFuture = _getControlledOrganizerIds(_auth.currentUser!.uid);
       setState(() {
         _controlledIdsFuture = newIdsFuture;
+        // Reset pagination on refresh
+        _currentLimit = 20;
+        _hasMoreData = true;
+        _isLoadingMore = false;
       });
       await newIdsFuture;
     }
@@ -503,6 +535,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             .collection('joinRequests')
             .where('eventOwnerId', whereIn: controlledIds)
             .orderBy('eventTime', descending: false)
+            .limit(_currentLimit)
             .snapshots();
 
         // Outgoing: User/Team của mình ĐI XIN vào sự kiện người khác
@@ -512,6 +545,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             .collection('joinRequests')
             .where('requesterId', whereIn: controlledIds)
             .orderBy('eventTime', descending: false)
+            .limit(_currentLimit)
             .snapshots();
         // ---------------------------------------------------------------------
 
@@ -521,6 +555,25 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             return StreamBuilder<QuerySnapshot>(
               stream: outgoingStream,
               builder: (context, outgoingSnapshot) {
+                // Update loading state based on data availability
+                if (_isLoadingMore &&
+                    incomingSnapshot.hasData &&
+                    outgoingSnapshot.hasData) {
+                  final totalDocs =
+                      (incomingSnapshot.data?.docs.length ?? 0) +
+                      (outgoingSnapshot.data?.docs.length ?? 0);
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      setState(() {
+                        _isLoadingMore = false;
+                        if (totalDocs < _currentLimit) {
+                          _hasMoreData = false;
+                        }
+                      });
+                    }
+                  });
+                }
+
                 if (!incomingSnapshot.hasData || !outgoingSnapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -686,10 +739,21 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     String? lastDateHeader;
 
     return ListView.builder(
+      controller: _scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(kDefaultPadding),
-      itemCount: requests.length,
+      itemCount: requests.length + (_hasMoreData ? 1 : 0),
       itemBuilder: (context, index) {
+        // Show loading indicator at the end
+        if (index == requests.length) {
+          if (_isLoadingMore) {
+            return const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return const SizedBox.shrink();
+        }
         final doc = requests[index];
         final data = doc.data() as Map<String, dynamic>;
 
