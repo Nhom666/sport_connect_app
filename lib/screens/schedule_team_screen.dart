@@ -39,6 +39,9 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
   bool _hasMoreData = true;
   int _currentLimit = 20;
 
+  // --- Biến để track sự kiện đã lên lịch (tránh duplicate) ---
+  final Set<String> _scheduledEvents = {};
+
   @override
   void initState() {
     super.initState();
@@ -87,16 +90,19 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
   }
 
   void _listenForAcceptedRequests() {
-    // Lắng nghe joinRequests mà team này là requester và được accept
+    bool isInitialLoadRequester = true;
+    bool isInitialLoadOwner = true;
+
+    // LISTENER 1: Lắng nghe joinRequests mà team này là REQUESTER và được accept
     _firestore
         .collection('joinRequests')
         .where('requesterId', isEqualTo: widget.teamId)
         .where('status', isEqualTo: 'accepted')
         .snapshots()
         .listen((snapshot) {
+          // Xử lý thay đổi real-time (khi status chuyển từ pending → accepted)
           for (var change in snapshot.docChanges) {
-            if (change.type == DocumentChangeType.modified ||
-                change.type == DocumentChangeType.added) {
+            if (change.type == DocumentChangeType.modified) {
               final data = change.doc.data();
               if (data != null) {
                 final eventId = data['eventId'] as String?;
@@ -106,11 +112,106 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
                 final eventOwnerId = data['eventOwnerId'] as String?;
 
                 if (eventId != null && eventTime != null) {
-                  // Lên lịch thông báo cho TẤT CẢ members của 2 team
+                  final eventDateTime = eventTime.toDate();
+                  // Chỉ lên lịch cho sự kiện trong tương lai
+                  if (eventDateTime.isAfter(DateTime.now())) {
+                    _scheduleNotificationsForBothTeams(
+                      eventId: eventId,
+                      eventName: eventName,
+                      eventTime: eventDateTime,
+                      requesterTeamId: requesterId,
+                      ownerTeamId: eventOwnerId,
+                    );
+                  }
+                }
+              }
+            }
+          }
+
+          // QUAN TRỌNG: Chỉ lên lịch cho TẤT CẢ sự kiện 1 LẦN khi khởi động app
+          if (isInitialLoadRequester) {
+            isInitialLoadRequester = false;
+
+            for (var doc in snapshot.docs) {
+              final data = doc.data();
+              final eventId = data['eventId'] as String?;
+              final eventName = data['eventName'] as String? ?? 'Sự kiện';
+              final eventTime = data['eventTime'] as Timestamp?;
+              final requesterId = data['requesterId'] as String?;
+              final eventOwnerId = data['eventOwnerId'] as String?;
+
+              if (eventId != null && eventTime != null) {
+                final eventDateTime = eventTime.toDate();
+                // Chỉ lên lịch cho sự kiện trong tương lai
+                if (eventDateTime.isAfter(DateTime.now())) {
                   _scheduleNotificationsForBothTeams(
                     eventId: eventId,
                     eventName: eventName,
-                    eventTime: eventTime.toDate(),
+                    eventTime: eventDateTime,
+                    requesterTeamId: requesterId,
+                    ownerTeamId: eventOwnerId,
+                  );
+                }
+              }
+            }
+          }
+        });
+
+    // LISTENER 2: Lắng nghe joinRequests mà team này là EVENT OWNER và có người được accept
+    _firestore
+        .collection('joinRequests')
+        .where('eventOwnerId', isEqualTo: widget.teamId)
+        .where('status', isEqualTo: 'accepted')
+        .snapshots()
+        .listen((snapshot) {
+          // Xử lý thay đổi real-time (khi status chuyển từ pending → accepted)
+          for (var change in snapshot.docChanges) {
+            if (change.type == DocumentChangeType.modified) {
+              final data = change.doc.data();
+              if (data != null) {
+                final eventId = data['eventId'] as String?;
+                final eventName = data['eventName'] as String? ?? 'Sự kiện';
+                final eventTime = data['eventTime'] as Timestamp?;
+                final requesterId = data['requesterId'] as String?;
+                final eventOwnerId = data['eventOwnerId'] as String?;
+
+                if (eventId != null && eventTime != null) {
+                  final eventDateTime = eventTime.toDate();
+                  // Chỉ lên lịch cho sự kiện trong tương lai
+                  if (eventDateTime.isAfter(DateTime.now())) {
+                    _scheduleNotificationsForBothTeams(
+                      eventId: eventId,
+                      eventName: eventName,
+                      eventTime: eventDateTime,
+                      requesterTeamId: requesterId,
+                      ownerTeamId: eventOwnerId,
+                    );
+                  }
+                }
+              }
+            }
+          }
+
+          // QUAN TRỌNG: Chỉ lên lịch cho TẤT CẢ sự kiện 1 LẦN khi khởi động app
+          if (isInitialLoadOwner) {
+            isInitialLoadOwner = false;
+
+            for (var doc in snapshot.docs) {
+              final data = doc.data();
+              final eventId = data['eventId'] as String?;
+              final eventName = data['eventName'] as String? ?? 'Sự kiện';
+              final eventTime = data['eventTime'] as Timestamp?;
+              final requesterId = data['requesterId'] as String?;
+              final eventOwnerId = data['eventOwnerId'] as String?;
+
+              if (eventId != null && eventTime != null) {
+                final eventDateTime = eventTime.toDate();
+                // Chỉ lên lịch cho sự kiện trong tương lai
+                if (eventDateTime.isAfter(DateTime.now())) {
+                  _scheduleNotificationsForBothTeams(
+                    eventId: eventId,
+                    eventName: eventName,
+                    eventTime: eventDateTime,
                     requesterTeamId: requesterId,
                     ownerTeamId: eventOwnerId,
                   );
@@ -129,6 +230,15 @@ class _ScheduleTeamScreenState extends State<ScheduleTeamScreen> {
     String? requesterTeamId,
     String? ownerTeamId,
   }) async {
+    // Kiểm tra xem đã lên lịch cho sự kiện này chưa
+    if (_scheduledEvents.contains(eventId)) {
+      print('⏭️ Bỏ qua: Đã lên lịch cho event $eventName ($eventId)');
+      return;
+    }
+
+    // Đánh dấu đã lên lịch
+    _scheduledEvents.add(eventId);
+
     final alarmService = AlarmNotificationService();
     final teamsToNotify = <String>[];
 

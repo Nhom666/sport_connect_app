@@ -54,6 +54,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   bool _hasMoreData = true;
   int _currentLimit = 20;
 
+  // --- Biến để track sự kiện đã lên lịch (tránh duplicate) ---
+  final Set<String> _scheduledEvents = {};
+
   @override
   void initState() {
     super.initState();
@@ -112,17 +115,19 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
   void _listenForAcceptedRequests() {
     final userId = _auth.currentUser!.uid;
+    bool isInitialLoadRequester = true;
+    bool isInitialLoadOwner = true;
 
-    // Lắng nghe joinRequests mà user này là requester và được accept
+    // LISTENER 1: Lắng nghe joinRequests mà user này là REQUESTER và được accept
     _firestore
         .collection('joinRequests')
         .where('requesterId', isEqualTo: userId)
         .where('status', isEqualTo: 'accepted')
         .snapshots()
         .listen((snapshot) {
+          // Xử lý thay đổi real-time (khi status chuyển từ pending → accepted)
           for (var change in snapshot.docChanges) {
-            if (change.type == DocumentChangeType.modified ||
-                change.type == DocumentChangeType.added) {
+            if (change.type == DocumentChangeType.modified) {
               final data = change.doc.data();
               if (data != null) {
                 final eventId = data['eventId'] as String?;
@@ -130,28 +135,110 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 final eventTime = data['eventTime'] as Timestamp?;
 
                 if (eventId != null && eventTime != null) {
-                  final alarmService = AlarmNotificationService();
+                  final eventDateTime = eventTime.toDate();
+                  // Chỉ lên lịch cho sự kiện trong tương lai
+                  if (eventDateTime.isAfter(DateTime.now())) {
+                    _scheduleAlarmsForEvent(eventId, eventName, eventDateTime);
+                  }
+                }
+              }
+            }
+          }
 
-                  // Lên lịch thông báo cho requester (người được accept)
-                  alarmService.scheduleEventReminders(
-                    eventId: '${eventId}_requester',
-                    eventName: eventName,
-                    eventTime: eventTime.toDate(),
-                  );
-                  print('📱 Đã lên lịch alarm cho requester: $eventName');
+          // QUAN TRỌNG: Chỉ lên lịch cho TẤT CẢ sự kiện 1 LẦN khi khởi động app
+          if (isInitialLoadRequester) {
+            isInitialLoadRequester = false;
 
-                  // Lên lịch thông báo cho event owner (người accept/tổ chức)
-                  alarmService.scheduleEventReminders(
-                    eventId: '${eventId}_owner',
-                    eventName: eventName,
-                    eventTime: eventTime.toDate(),
-                  );
-                  print('📱 Đã lên lịch alarm cho event owner: $eventName');
+            for (var doc in snapshot.docs) {
+              final data = doc.data();
+              final eventId = data['eventId'] as String?;
+              final eventName = data['eventName'] as String? ?? 'Sự kiện';
+              final eventTime = data['eventTime'] as Timestamp?;
+
+              if (eventId != null && eventTime != null) {
+                final eventDateTime = eventTime.toDate();
+                // Chỉ lên lịch cho sự kiện trong tương lai
+                if (eventDateTime.isAfter(DateTime.now())) {
+                  _scheduleAlarmsForEvent(eventId, eventName, eventDateTime);
                 }
               }
             }
           }
         });
+
+    // LISTENER 2: Lắng nghe joinRequests mà user này là EVENT OWNER và có người được accept
+    _firestore
+        .collection('joinRequests')
+        .where('eventOwnerId', isEqualTo: userId)
+        .where('status', isEqualTo: 'accepted')
+        .snapshots()
+        .listen((snapshot) {
+          // Xử lý thay đổi real-time (khi status chuyển từ pending → accepted)
+          for (var change in snapshot.docChanges) {
+            if (change.type == DocumentChangeType.modified) {
+              final data = change.doc.data();
+              if (data != null) {
+                final eventId = data['eventId'] as String?;
+                final eventName = data['eventName'] as String? ?? 'Sự kiện';
+                final eventTime = data['eventTime'] as Timestamp?;
+
+                if (eventId != null && eventTime != null) {
+                  final eventDateTime = eventTime.toDate();
+                  // Chỉ lên lịch cho sự kiện trong tương lai
+                  if (eventDateTime.isAfter(DateTime.now())) {
+                    _scheduleAlarmsForEvent(eventId, eventName, eventDateTime);
+                  }
+                }
+              }
+            }
+          }
+
+          // QUAN TRỌNG: Chỉ lên lịch cho TẤT CẢ sự kiện 1 LẦN khi khởi động app
+          if (isInitialLoadOwner) {
+            isInitialLoadOwner = false;
+
+            for (var doc in snapshot.docs) {
+              final data = doc.data();
+              final eventId = data['eventId'] as String?;
+              final eventName = data['eventName'] as String? ?? 'Sự kiện';
+              final eventTime = data['eventTime'] as Timestamp?;
+
+              if (eventId != null && eventTime != null) {
+                final eventDateTime = eventTime.toDate();
+                // Chỉ lên lịch cho sự kiện trong tương lai
+                if (eventDateTime.isAfter(DateTime.now())) {
+                  _scheduleAlarmsForEvent(eventId, eventName, eventDateTime);
+                }
+              }
+            }
+          }
+        });
+  }
+
+  // Helper method để lên lịch thông báo
+  void _scheduleAlarmsForEvent(
+    String eventId,
+    String eventName,
+    DateTime eventTime,
+  ) {
+    // Kiểm tra xem đã lên lịch cho sự kiện này chưa
+    if (_scheduledEvents.contains(eventId)) {
+      print('⏭️ Bỏ qua: Đã lên lịch cho event $eventName ($eventId)');
+      return;
+    }
+
+    // Đánh dấu đã lên lịch
+    _scheduledEvents.add(eventId);
+
+    final alarmService = AlarmNotificationService();
+
+    // Chỉ lên lịch 1 LẦN cho mỗi sự kiện (dùng eventId làm unique key)
+    alarmService.scheduleEventReminders(
+      eventId: eventId, // Bỏ suffix _requester/_owner
+      eventName: eventName,
+      eventTime: eventTime,
+    );
+    print('📱 Đã lên lịch alarm cho: $eventName');
   }
 
   Future<void> _refreshData() async {
